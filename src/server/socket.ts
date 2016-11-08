@@ -102,18 +102,9 @@ class ResolverBinder {
         this.m_subs = subs;
     }
 
-    public do(callback: PacketReceiver | PacketReceiver[]) {
-        if (callback instanceof Array) {
-            let receivers = <PacketReceiver[]>callback;
-        
-            for (let sub of this.m_subs) {
-                for (let receiver of receivers) {
-                    this.m_manager.set(this.m_main, sub, receiver);
-                }
-            }
-        } else {
-            let receiver = <PacketReceiver>callback;
-            this.do([receiver]);
+    public do(callback: PacketReceiver) {
+        for (let sub of this.m_subs) {
+            this.m_manager.set(this.m_main, sub, callback);
         }
     }
 
