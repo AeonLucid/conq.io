@@ -67,9 +67,9 @@ class ResolverBinder {
         this.m_subs = subs;
     }
 
-    public do(raw: PacketReceiver | PacketReceiver[]) {
-        if (raw instanceof Array) {
-            let receivers = <PacketReceiver[]>raw;
+    public do(callback: PacketReceiver | PacketReceiver[]) {
+        if (callback instanceof Array) {
+            let receivers = <PacketReceiver[]>callback;
         
             for (let sub of this.m_subs) {
                 for (let receiver of receivers) {
@@ -77,7 +77,7 @@ class ResolverBinder {
                 }
             }
         } else {
-            let receiver = <PacketReceiver>raw;
+            let receiver = <PacketReceiver>callback;
             this.do([receiver]);
         }
     }
@@ -124,28 +124,28 @@ class ClientProperty {
         this.m_clients = clients;
     }
     
-    public select(raw: Client | Client[] | ((client: Client) => boolean)): Client[] {
+    public select(selection: Client | Client[] | ((client: Client) => boolean)): Client[] {
         let result: Client[] = [];
-        if (raw instanceof Array) {
-            let clients = <Client[]>(raw);
+        if (selection instanceof Array) {
+            let clients = <Client[]>(selection);
             for (let client of clients) {
                 if (this.m_clients.has(client))  
                     result.push(client);
             }
-        } else if (raw instanceof Function) {
-            let selector = <(client: Client) => boolean>(raw);
+        } else if (selection instanceof Function) {
+            let selector = <(client: Client) => boolean>(selection);
             result = [...this.m_clients].filter(client => !selector(client));
         } else {
-            let client = <Client>(raw);
+            let client = <Client>(selection);
             result.push(client);
         }
 
         return result;
     }
 
-    public exist(raw: Client | Client[]) {
-        if (raw instanceof Array) {
-            let clients = <Client[]>(raw);
+    public exist(client: Client | Client[]) {
+        if (client instanceof Array) {
+            let clients = <Client[]>(client);
             let selected = this.select(clients);
 
             // Check if clients and selection are equal
@@ -158,8 +158,7 @@ class ClientProperty {
 
             return true;
         } else {
-            let client = <Client>(raw);
-            this.exist([client]);
+            this.exist([<Client>client]);
         }
     }
 }
@@ -175,9 +174,9 @@ class SendSelector {
         this.m_clientProperty = ClientProperty;
     }
 
-    public to(raw: Client | Client[] | ((client: Client) => boolean)) {
-        let selection = this.m_clientProperty.select(raw);
-        for (let client of selection)
+    public to(selection: Client | Client[] | ((client: Client) => boolean)) {
+        let clients = this.m_clientProperty.select(selection);
+        for (let client of clients)
             this.m_out({ client: client, data: this.m_data });
     }
 }
