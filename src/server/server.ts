@@ -236,5 +236,3 @@ export class Server {
         return new ResolverProperty(this.m_resolverManager);
     }
 }
-
-let server = new Server(undefined);
