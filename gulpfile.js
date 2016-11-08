@@ -24,7 +24,7 @@ var bbonfig = {
 
 gulp.task("default", ["rebuild"]);
 
-// Compile and uglify typescript for client
+// Compile and uglify typescript code for client
 gulp.task("build-client", function() {
     var res = gulp.src("src/public/**/*.ts")
         .pipe(gts(tsconfig))
@@ -40,7 +40,7 @@ gulp.task("build-client", function() {
     return res;
 });
 
-// Compile and uglify typescript for client
+// Compile and uglify typescript code for server
 gulp.task("build-server", function() {
     var res = gulp.src("src/server/**/*.ts")
         .pipe(gts(tsconfig))
@@ -50,9 +50,10 @@ gulp.task("build-server", function() {
     return res;
 });
 
+// Compile and uglify html and css code for client
 gulp.task("build-view", [ "build-html", "build-css" ]);
 
-// Copy and uglify html for client
+// Copy and uglify html code for client
 gulp.task("build-html", function() {
     var settings = {
         collapseWhitespace: true,
@@ -66,7 +67,7 @@ gulp.task("build-html", function() {
 });
 
 
-// Copy and uglify css for client
+// Copy and uglify css code for client
 gulp.task("build-css", function() {
     var res = gulp.src("src/view/**/*.css")
         .pipe(uglify_css())
@@ -74,16 +75,16 @@ gulp.task("build-css", function() {
     return res;
 });
 
-// Build the application to dest
+// Build the whole application to dest
 gulp.task("build", ["build-client", "build-server", "build-view"]);
 
-// Clean the dest folder
+// Clean the build folder
 gulp.task("clean", function() {
     var res = del(["dist/**/*"]);
     return res;
 });
 
-// Clean the dest folder and rebuild the applicaton
+// Clean the build folder and rebuild the applicaton
 gulp.task("rebuild", function() {
     var res = run_sequence('clean', 'build');
 });
