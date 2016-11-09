@@ -1,10 +1,10 @@
-export type Binary = ArrayBuffer;
-export type PacketReceiver = (packet: Packet) => void;
-export const padding = 2;
+type Binary = ArrayBuffer;
+type PacketReceiver = (packet: Packet) => void;
+let padding = 2;
 
 type StateListener = () => void;
 
-export interface Packet {
+interface Packet {
     data: Binary;
 }
 
@@ -16,7 +16,7 @@ interface ResolverManagerObject {
 
 class ResolverManager {
     private m_resolvers: ResolverManagerObject[];
-    
+
     constructor() {
         this.m_resolvers = [];
     }
@@ -64,7 +64,7 @@ class ResolverStateBinder {
     }
 
     public ignore() {
-        this.m_stateListener = () => {};
+        this.m_stateListener = () => { };
     }
 }
 
@@ -116,7 +116,7 @@ class ResolverProperty {
     }
 
     public get open() {
-        return new ResolverStateBinder(this.m_openListener);    
+        return new ResolverStateBinder(this.m_openListener);
     }
 
     public get close() {
@@ -132,7 +132,7 @@ class ResolverProperty {
     }
 }
 
-export class Socket {
+class Socket {
     private m_socket: WebSocket;
     private m_resolverManager: ResolverManager;
     private m_open: boolean = false;
