@@ -11,10 +11,10 @@ var uglify_css = require('gulp-clean-css');
 var uglify_html = require('gulp-htmlmin');
 
 var tsconfig = {
-        target: "es2015",
-        module: "commonjs",
-        sourceMap: true,
-        strictNullChecks: true
+    target: "es2015",
+    module: "commonjs",
+    sourceMap: true,
+    strictNullChecks: true
 };
 
 var bbonfig = {
@@ -32,7 +32,7 @@ gulp.task("build-client", function() {
         .pipe(order([
             "src/public/!(start)*.js",
             "src/public/start.js"
-        ], {base: './'}))
+        ], { base: './' }))
         .pipe(print())
         .pipe(concat("script.js"))
         .pipe(uglify())
@@ -51,7 +51,7 @@ gulp.task("build-server", function() {
 });
 
 // Compile and uglify html and css code for client
-gulp.task("build-view", [ "build-html", "build-css" ]);
+gulp.task("build-view", ["build-html", "build-css"]);
 
 // Copy and uglify html code for client
 gulp.task("build-html", function() {
