@@ -52,19 +52,23 @@ class ResolverManager {
     }
 }
 
-class ResolverStateBinder {
-    private m_stateListener: StateListener;
+interface ResolverStateWrapper {
+    listener: StateListener;
+}
 
-    constructor(stateListener: StateListener) {
+class ResolverStateBinder {
+    private m_stateListener: ResolverStateWrapper;
+
+    constructor(stateListener: ResolverStateWrapper) {
         this.m_stateListener = stateListener;
     }
 
     public do(callback: StateListener) {
-        this.m_stateListener = callback;
+        this.m_stateListener.listener = callback;
     }
 
     public ignore() {
-        this.m_stateListener = () => { };
+        this.m_stateListener.listener = () => { };
     }
 }
 
@@ -94,10 +98,10 @@ class ResolverBinder {
 
 class ResolverProperty {
     private m_manager: ResolverManager;
-    private m_openListener: StateListener;
-    private m_closeListener: StateListener;
+    private m_openListener: ResolverStateWrapper;
+    private m_closeListener: ResolverStateWrapper;
 
-    constructor(manager: ResolverManager, openListener: StateListener, closeListener: StateListener) {
+    constructor(manager: ResolverManager, openListener: ResolverStateWrapper, closeListener: ResolverStateWrapper) {
         this.m_manager = manager;
         this.m_openListener = openListener;
         this.m_closeListener = closeListener;
@@ -136,13 +140,15 @@ class Socket {
     private m_socket: WebSocket;
     private m_resolverManager: ResolverManager;
     private m_open: boolean = false;
-    private m_openListener: StateListener;
-    private m_closeListener: StateListener;
+    private m_openListener: ResolverStateWrapper;
+    private m_closeListener: ResolverStateWrapper;
 
     constructor(url: string) {
         this.m_resolverManager = new ResolverManager();
         this.m_socket = new WebSocket(url);
         this.m_socket.binaryType = "arraybuffer";
+        this.m_openListener = { listener: () => { } };
+        this.m_closeListener = { listener: () => { } };
 
         this.m_socket.onmessage = event => {
             let data = <ArrayBuffer>event.data;
@@ -156,12 +162,12 @@ class Socket {
 
         this.m_socket.onopen = () => {
             this.m_open = true;
-            this.m_openListener();
+            this.m_openListener.listener();
         }
 
         this.m_socket.onclose = () => {
             this.m_open = false;
-            this.m_closeListener();
+            this.m_closeListener.listener();
         }
     }
 
