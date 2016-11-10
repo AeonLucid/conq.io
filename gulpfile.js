@@ -29,7 +29,7 @@ var bbonfig = {
 gulp.task("default", ["rebuild"]);
 
 // Compile and uglify typescript code for client
-gulp.task("build-client", function () {
+gulp.task("build-client", function() {
     var res = gulp.src("src/public/**/*.ts")
         .pipe(order([
             "src/public/!(start)*.js",
@@ -38,18 +38,18 @@ gulp.task("build-client", function () {
         .pipe(print())
         .pipe(concat("script.ts"))
         .pipe(gts(tsconfig))
-        //.pipe(babel(bbonfig))
-        //.pipe(uglify())
+        .pipe(babel(bbonfig))
+        .pipe(uglify())
         .pipe(gulp.dest("dist/public"));
     return res;
 });
 
 // Compile and uglify typescript code for server
-gulp.task("build-server", function () {
+gulp.task("build-server", function() {
     var res = gulp.src("src/server/**/*.ts")
         .pipe(gts(tsconfig))
-        //.pipe(babel(bbonfig))
-        //.pipe(uglify())
+        .pipe(babel(bbonfig))
+        .pipe(uglify())
         .pipe(gulp.dest("dist/server"));
     return res;
 });
@@ -58,7 +58,7 @@ gulp.task("build-server", function () {
 gulp.task("build-view", ["build-html", "build-css"]);
 
 // Copy and uglify html code for client
-gulp.task("build-html", function () {
+gulp.task("build-html", function() {
     var settings = {
         collapseWhitespace: true,
         removeComments: true
@@ -71,7 +71,7 @@ gulp.task("build-html", function () {
 });
 
 // Copy and uglify css code for client
-gulp.task("build-css", function () {
+gulp.task("build-css", function() {
     var res = gulp.src("src/view/**/*.css")
         .pipe(uglify_css())
         .pipe(gulp.dest("dist/public"));
@@ -82,13 +82,13 @@ gulp.task("build-css", function () {
 gulp.task("build", ["build-client", "build-server", "build-view"]);
 
 // Clean the build folder
-gulp.task("clean", function () {
+gulp.task("clean", function() {
     var res = del(["dist/**/*"]);
     return res;
 });
 
 // Clean the build folder and rebuild the applicaton
-gulp.task("rebuild", function () {
+gulp.task("rebuild", function() {
     var res = run_sequence('clean', 'build');
     return res;
 });
@@ -98,14 +98,14 @@ gulp.task("rebuild", function () {
 gulp.task("watch", ["nodemon-init", "browser-sync-init", "watch-files"]);
 
 // Call the appropriate build task when the working directory change
-gulp.task("watch-files", function () {
+gulp.task("watch-files", function() {
     gulp.watch("src/public/**/*.ts", ["build-client"]);
     gulp.watch("src/server/**/*.ts", ["build-server"]);
     gulp.watch("src/view/**/*.*", ["build-view"]);
 });
 
-// Reloads the browsers on file change.
-gulp.task("browser-sync-init", function () {
+// Reloads the browsers on file change
+gulp.task("browser-sync-init", function() {
     var res = browser_sync({
         proxy: "localhost:3000",
         port: 5000,
@@ -114,15 +114,15 @@ gulp.task("browser-sync-init", function () {
     return res;
 });
 
-// Restarts the server on file change.
-gulp.task("nodemon-init", function () {
+// Restarts the server on file change
+gulp.task("nodemon-init", function() {
     var res = nodemon({
         script: "dist/server/init.js",
         watch: "src/**/*.*"
     });
 
-    res.on("start", function () {
-        setTimeout(function () {
+    res.on("start", function() {
+        setTimeout(function() {
             reload({ stream: false });
         }, 1000);
     });
