@@ -1,30 +1,36 @@
 export type Client = number;
 export type Binary = ArrayBuffer;
-export type PacketReceiver = (packet: Packet) => void;
 export const padding = 2;
 
-export interface Packet {
+interface DataPacket {
     client: Client;
     data: Binary;
 }
 
+interface StatePacket {
+    client: Client;
+}
+
+type StateListener = (packet: StatePacket) => void;
+type PacketListener = (packet: DataPacket) => void;
+
 export class SocketHandler {
-    private m_out: PacketReceiver;
+    private m_out: PacketListener;
     private m_listeners: SocketListener[];
 
-    constructor(out: PacketReceiver) {
+    constructor(out: PacketListener) {
         this.m_out = out;
         this.m_listeners = [];
     }
 
     public connect(client: Client) {
         for (let listener of this.m_listeners)
-            listener.connect(client);
+            listener.connect({ client: client });
     }
 
     public disconnect(client: Client) {
         for (let listener of this.m_listeners)
-            listener.disconnect(client);
+            listener.disconnect({ client: client });
     }
 
     public packet(client: Client, data: Binary) {
@@ -42,15 +48,15 @@ export class SocketHandler {
 }
 
 interface SocketListener {
-    connect: (client: Client) => void;
-    disconnect: (client: Client) => void;
-    packet: (packet: Packet) => void;
+    connect: (client: StatePacket) => void;
+    disconnect: (packet: StatePacket) => void;
+    packet: (packet: DataPacket) => void;
 }
 
 interface ResolverManagerObject {
     main: number;
     sub: number;
-    receiver: PacketReceiver;
+    receiver: PacketListener;
 }
 
 class ResolverManager {
@@ -60,7 +66,7 @@ class ResolverManager {
         this.m_resolvers = [];
     }
 
-    public set(main: number, sub: number, receiver: PacketReceiver) {
+    public set(main: number, sub: number, receiver: PacketListener) {
         for (let resolver of this.m_resolvers) {
             if (resolver.main === main && resolver.sub === sub) {
                 resolver.receiver = receiver;
@@ -82,12 +88,32 @@ class ResolverManager {
         }
     }
 
-    public call(main: number, sub: number, packet: Packet) {
+    public call(main: number, sub: number, packet: DataPacket) {
         for (let resolver of this.m_resolvers) {
             if (resolver.main === main && resolver.sub === sub) {
                 resolver.receiver(packet);
             }
         }
+    }
+}
+
+interface ResolverStateWrapper {
+    listener: StateListener;
+}
+
+class ResolverStateBinder {
+    private m_stateListener: ResolverStateWrapper;
+
+    constructor(stateListener: ResolverStateWrapper) {
+        this.m_stateListener = stateListener;
+    }
+
+    public do(callback: StateListener) {
+        this.m_stateListener.listener = callback;
+    }
+
+    public ignore() {
+        this.m_stateListener.listener = (packet) => { };
     }
 }
 
@@ -102,7 +128,7 @@ class ResolverBinder {
         this.m_subs = subs;
     }
 
-    public do(callback: PacketReceiver) {
+    public do(callback: PacketListener) {
         for (let sub of this.m_subs) {
             this.m_manager.set(this.m_main, sub, callback);
         }
@@ -117,9 +143,13 @@ class ResolverBinder {
 
 class ResolverProperty {
     private m_manager: ResolverManager;
+    private m_openListener: ResolverStateWrapper;
+    private m_closeListener: ResolverStateWrapper;
 
-    constructor(manager: ResolverManager) {
+    constructor(manager: ResolverManager, openListener: ResolverStateWrapper, closeListener: ResolverStateWrapper) {
         this.m_manager = manager;
+        this.m_openListener = openListener;
+        this.m_closeListener = closeListener;
     }
 
     public system(sub: number | number[]) {
@@ -132,6 +162,14 @@ class ResolverProperty {
 
     public debug(sub: number | number[]) {
         return new ResolverBinder(this.m_manager, 0x02, this.subArray(sub));
+    }
+
+    public get open() {
+        return new ResolverStateBinder(this.m_openListener);
+    }
+
+    public get close() {
+        return new ResolverStateBinder(this.m_closeListener);
     }
 
     private subArray(raw: number | number[]) {
@@ -191,10 +229,10 @@ class ClientProperty {
 
 class SendSelector {
     private m_data: Binary;
-    private m_out: PacketReceiver;
+    private m_out: PacketListener;
     private m_clientProperty: ClientProperty;
 
-    constructor(data: Binary, out: PacketReceiver, ClientProperty: ClientProperty) {
+    constructor(data: Binary, out: PacketListener, ClientProperty: ClientProperty) {
         this.m_data = data;
         this.m_out = out;
         this.m_clientProperty = ClientProperty;
@@ -208,25 +246,31 @@ class SendSelector {
 }
 
 export class Server {
-    private m_out: PacketReceiver;
+    private m_out: PacketListener;
     private m_clients: Set<Client>;
     private m_resolverManager: ResolverManager;
+    private m_openListener: ResolverStateWrapper;
+    private m_closeListener: ResolverStateWrapper;
 
     constructor(handler: SocketHandler) {
         this.setupListener(handler);    
         
         this.m_clients = new Set<Client>();
         this.m_resolverManager = new ResolverManager();
+        this.m_openListener = { listener: () => { } };
+        this.m_closeListener = { listener: () => { } };
     }
 
     private setupListener(handler: SocketHandler) {
         let listener: SocketListener = {
-            connect: client => {
-                this.m_clients.add(client);
+            connect: packet => {
+                this.m_clients.add(packet.client);
+                this.m_openListener.listener(packet);
             },
 
-            disconnect: client => {
-                this.m_clients.delete(client);
+            disconnect: packet => {
+                this.m_clients.delete(packet.client);
+                this.m_closeListener.listener(packet);
             },
 
             packet: packet => {
@@ -259,6 +303,7 @@ export class Server {
     }
 
     public get on() {
-        return new ResolverProperty(this.m_resolverManager);
+        return new ResolverProperty(this.m_resolverManager,
+            this.m_openListener, this.m_closeListener);
     }
 }

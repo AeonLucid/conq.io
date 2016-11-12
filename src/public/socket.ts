@@ -3,7 +3,7 @@ namespace wsw {
     export let padding = 2;
 
     type StateListener = () => void;
-    type PacketReceiver = (packet: Packet) => void;
+    type PacketListener = (packet: Packet) => void;
 
     interface Packet {
         data: Binary;
@@ -12,7 +12,7 @@ namespace wsw {
     interface ResolverManagerObject {
         main: number;
         sub: number;
-        receiver: PacketReceiver;
+        receiver: PacketListener;
     }
 
     class ResolverManager {
@@ -22,7 +22,7 @@ namespace wsw {
             this.m_resolvers = [];
         }
 
-        public set(main: number, sub: number, receiver: PacketReceiver) {
+        public set(main: number, sub: number, receiver: PacketListener) {
             for (let resolver of this.m_resolvers) {
                 if (resolver.main === main && resolver.sub === sub) {
                     resolver.receiver = receiver;
@@ -84,7 +84,7 @@ namespace wsw {
             this.m_subs = subs;
         }
 
-        public do(callback: PacketReceiver) {
+        public do(callback: PacketListener) {
             for (let sub of this.m_subs) {
                 this.m_manager.set(this.m_main, sub, callback);
             }
