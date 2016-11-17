@@ -1,12 +1,17 @@
 namespace wsw {
     export type Binary = ArrayBuffer;
     export let padding = 2;
+    
+    type StateListener = (packet: StatePacket) => void;
+    type PacketListener = (packet: DataPacket) => void;
 
-    type StateListener = () => void;
-    type PacketListener = (packet: Packet) => void;
+    interface DataPacket {
+        raw: Binary;
+        app: Application;
+    }
 
-    interface Packet {
-        data: Binary;
+    interface StatePacket {
+        app: Application;
     }
 
     interface ResolverManagerObject {
@@ -44,7 +49,7 @@ namespace wsw {
             }
         }
 
-        public call(main: number, sub: number, packet: Packet) {
+        public call(main: number, sub: number, packet: DataPacket) {
             for (let resolver of this.m_resolvers) {
                 if (resolver.main === main && resolver.sub === sub) {
                     resolver.receiver(packet);
@@ -137,12 +142,25 @@ namespace wsw {
         }
     }
 
+    class Application {
+        private m_socket: WebSocket;
+
+        constructor(socket: WebSocket) {
+            this.m_socket = socket;
+        }
+
+        public send(data: Binary) {
+            this.m_socket.send(data);
+        }
+    }
+
     export class Socket {
         private m_socket: WebSocket;
         private m_resolverManager: ResolverManager;
         private m_open: boolean = false;
         private m_openListener: ResolverStateWrapper;
         private m_closeListener: ResolverStateWrapper;
+        private m_app: Application;
 
         constructor(url: string) {
             this.m_resolverManager = new ResolverManager();
@@ -150,6 +168,7 @@ namespace wsw {
             this.m_socket.binaryType = "arraybuffer";
             this.m_openListener = { listener: () => { } };
             this.m_closeListener = { listener: () => { } };
+            this.m_app = new Application(this.m_socket);
 
             this.m_socket.onmessage = event => {
                 let data = <ArrayBuffer>event.data;
@@ -158,22 +177,18 @@ namespace wsw {
 
                 let main = (header & 0xF000) >> 12;
                 let sub = header & 0x0FFF;
-                this.m_resolverManager.call(main, sub, { data: data });
+                this.m_resolverManager.call(main, sub, { app: this.m_app, raw: data });
             }
 
             this.m_socket.onopen = () => {
                 this.m_open = true;
-                this.m_openListener.listener();
+                this.m_openListener.listener({ app: this.m_app });
             }
 
             this.m_socket.onclose = () => {
                 this.m_open = false;
-                this.m_closeListener.listener();
+                this.m_closeListener.listener({ app: this.m_app });
             }
-        }
-
-        public send(data: Binary) {
-            this.m_socket.send(data);
         }
 
         public get on() {
