@@ -2,23 +2,35 @@ export type Client = number;
 export type Binary = ArrayBuffer;
 export const padding = 2;
 
-interface DataPacket {
+type StateListener = (packet: StatePacket) => void;
+type PacketListener = (packet: DataPacket) => void;
+type RawPacketListener = (packet: RawDataPacket) => void;
+
+interface RawDataPacket {
     client: Client;
     data: Binary;
 }
 
-interface StatePacket {
+interface RawStatePacket {
     client: Client;
 }
 
-type StateListener = (packet: StatePacket) => void;
-type PacketListener = (packet: DataPacket) => void;
+interface DataPacket {
+    from: Client;
+    raw: Binary;
+    app: Application;
+}
+
+interface StatePacket {
+    from: Client;
+    app: Application;
+}
 
 export class SocketHandler {
-    private m_out: PacketListener;
+    private m_out: RawPacketListener;
     private m_listeners: SocketListener[];
 
-    constructor(out: PacketListener) {
+    constructor(out: RawPacketListener) {
         this.m_out = out;
         this.m_listeners = [];
     }
@@ -48,9 +60,9 @@ export class SocketHandler {
 }
 
 interface SocketListener {
-    connect: (client: StatePacket) => void;
-    disconnect: (packet: StatePacket) => void;
-    packet: (packet: DataPacket) => void;
+    connect: (client: RawStatePacket) => void;
+    disconnect: (packet: RawStatePacket) => void;
+    packet: (packet: RawDataPacket) => void;
 }
 
 interface ResolverManagerObject {
@@ -227,50 +239,76 @@ class ClientProperty {
     }
 }
 
-class SendSelector {
-    private m_data: Binary;
-    private m_out: PacketListener;
+class ClientSelector {
+    private m_callback: (client: Client) => void;
     private m_clientProperty: ClientProperty;
 
-    constructor(data: Binary, out: PacketListener, ClientProperty: ClientProperty) {
-        this.m_data = data;
-        this.m_out = out;
-        this.m_clientProperty = ClientProperty;
+    constructor(callback: (client: Client) => void, clientProperty: ClientProperty) {
+        this.m_callback = callback;
+        this.m_clientProperty = clientProperty;
     }
 
-    public to(selection: Client | Client[] | ((client: Client) => boolean)) {
+    public where(selection: Client | Client[] | ((client: Client) => boolean)) {
         let clients = this.m_clientProperty.select(selection);
         for (let client of clients)
-            this.m_out({ client: client, data: this.m_data });
+            this.m_callback(client);
+    }
+
+    public all() {
+        let clients = this.m_clientProperty.select(client => true);
+        for (let client of clients)
+            this.m_callback(client);
+    }
+}
+
+class Application {
+    private m_out: RawPacketListener;
+    private m_clients: Set<Client>;
+
+    constructor(out: RawPacketListener, clients: Set<Client>) {
+        this.m_out = out;
+        this.m_clients = clients;
+    }
+
+    public send(data: Binary) {
+        return new ClientSelector(client => {
+            this.m_out({ client: client, data: data });
+        }, this.client);
+    }
+
+    public get client() {
+        return new ClientProperty(this.m_clients);
     }
 }
 
 export class Server {
-    private m_out: PacketListener;
+    private m_app: Application;
+    private m_out: RawPacketListener;
     private m_clients: Set<Client>;
     private m_resolverManager: ResolverManager;
     private m_openListener: ResolverStateWrapper;
     private m_closeListener: ResolverStateWrapper;
 
     constructor(handler: SocketHandler) {
-        this.setupListener(handler);    
-        
+        this.setupListener(handler);
+
         this.m_clients = new Set<Client>();
         this.m_resolverManager = new ResolverManager();
         this.m_openListener = { listener: () => { } };
         this.m_closeListener = { listener: () => { } };
+        this.m_app = new Application(this.m_out, this.m_clients);
     }
 
     private setupListener(handler: SocketHandler) {
         let listener: SocketListener = {
             connect: packet => {
                 this.m_clients.add(packet.client);
-                this.m_openListener.listener(packet);
+                this.m_openListener.listener({ app: this.m_app, from: packet.client });
             },
 
             disconnect: packet => {
                 this.m_clients.delete(packet.client);
-                this.m_closeListener.listener(packet);
+                this.m_closeListener.listener({ app: this.m_app, from: packet.client });
             },
 
             packet: packet => {
@@ -291,15 +329,11 @@ export class Server {
         let header = view.getUint16(0);
         let main = (header & 0xF000) >> 12;
         let sub = header & 0x0FFF;
-        this.m_resolverManager.call(main, sub, { client: client, data: data });
+        this.m_resolverManager.call(main, sub, { app: this.m_app, from: client, raw: data });
     }
 
-    public send(data: Binary) {
-        return new SendSelector(data, this.m_out, this.client);
-    }
-
-    public get client() {
-        return new ClientProperty(this.m_clients);
+    public get app() {
+        return this.m_app;
     }
 
     public get on() {
