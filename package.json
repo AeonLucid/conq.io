@@ -7,10 +7,12 @@
     "start": "node ./dist/server/init.js"
   },
   "dependencies": {
+    "bson": "^0.5.6",
     "express": "~4.13.4",
     "uws": "^0.10.5"
   },
   "devDependencies": {
+    "@types/bson": "^0.4.30",
     "@types/express": "^4.0.33",
     "@types/jquery": "^2.0.33",
     "@types/node": "^6.0.45",
