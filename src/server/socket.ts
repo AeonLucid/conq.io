@@ -1,3 +1,5 @@
+import bser = require("./basic-serializer");
+
 export type Client = number;
 export type Binary = ArrayBuffer;
 export const padding = 2;
@@ -5,6 +7,7 @@ export const padding = 2;
 type StateListener = (packet: StatePacket) => void;
 type PacketListener = (packet: DataPacket) => void;
 type RawPacketListener = (packet: RawDataPacket) => void;
+type BasicPacketIOBuilder = <Input, Output>(inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>) => BasicPacketIO<Input, Output>;
 
 interface RawDataPacket {
     client: Client;
@@ -18,12 +21,50 @@ interface RawStatePacket {
 interface DataPacket {
     from: Client;
     raw: Binary;
+    bpio: BasicPacketIOBuilder;
     app: Application;
 }
 
 interface StatePacket {
     from: Client;
     app: Application;
+}
+
+class BasicPacketIO<Input, Output> {
+    private m_app: Application;
+    private m_outputCodec: bser.Codec<Output>;
+    private m_input: Input | undefined;
+    private m_client: Client;
+    private m_raw: Binary;
+
+    constructor(app: Application, client: Client, raw: Binary, inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>) {
+        this.m_app = app;
+        this.m_outputCodec = outputCodec;
+        this.m_client = client;
+        this.m_raw = raw;
+        this.m_input = inputCodec.decode(raw, padding);
+    }
+
+    public get valid() {
+        return this.m_input !== undefined;
+    }
+
+    public get input(): Input {
+        if (!this.valid)
+            throw new Error("Given packet is not valid");
+        return this.m_input!;
+    }
+
+    public send(output: Output) {
+        let outputBinary = this.m_outputCodec.encode(output, padding);
+        this.m_app.send(outputBinary).where(this.m_client);
+    }
+}
+
+function genBasicPacketIOBuilder(app: Application, client: Client, raw: Binary): BasicPacketIOBuilder {
+    return function builder<Input, Output>(inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>): BasicPacketIO<Input, Output> {
+        return new BasicPacketIO<Input, Output>(app, client, raw, inputCodec, outputCodec);
+    }
 }
 
 export class SocketHandler {
@@ -73,7 +114,7 @@ interface ResolverManagerObject {
 
 class ResolverManager {
     private m_resolvers: ResolverManagerObject[];
-    
+
     constructor() {
         this.m_resolvers = [];
     }
@@ -199,13 +240,13 @@ class ClientProperty {
     constructor(clients: Set<Client>) {
         this.m_clients = clients;
     }
-    
+
     public select(selection: Client | Client[] | ((client: Client) => boolean)): Client[] {
         let result: Client[] = [];
         if (selection instanceof Array) {
             let clients = <Client[]>(selection);
             for (let client of clients) {
-                if (this.m_clients.has(client))  
+                if (this.m_clients.has(client))
                     result.push(client);
             }
         } else if (selection instanceof Function) {
@@ -312,7 +353,7 @@ export class Server {
             },
 
             packet: packet => {
-                this.onPacket(packet.client, packet.data);        
+                this.onPacket(packet.client, packet.data);
             }
         }
         handler.attach(listener);
@@ -321,7 +362,7 @@ export class Server {
 
     private onPacket(client: Client, data: Binary) {
         let view = new DataView(data);
-        
+
         // Invalid packet, ignore it
         if (view.byteLength < 2)
             return;
@@ -329,7 +370,10 @@ export class Server {
         let header = view.getUint16(0);
         let main = (header & 0xF000) >> 12;
         let sub = header & 0x0FFF;
-        this.m_resolverManager.call(main, sub, { app: this.m_app, from: client, raw: data });
+        this.m_resolverManager.call(main, sub, {
+            app: this.m_app, bpio: genBasicPacketIOBuilder(this.m_app,
+                client, data), from: client, raw: data
+        });
     }
 
     public get app() {
@@ -337,7 +381,6 @@ export class Server {
     }
 
     public get on() {
-        return new ResolverProperty(this.m_resolverManager,
-            this.m_openListener, this.m_closeListener);
+        return new ResolverProperty(this.m_resolverManager, this.m_openListener, this.m_closeListener);
     }
 }
