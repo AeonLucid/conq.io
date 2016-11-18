@@ -8,14 +8,14 @@ namespace wsw {
         => BasicPacketIO<Input, Output>;
     type BasicPacketInputBuilder = <Input>(inputCodec: bser.Codec<Input>) => BasicPacketInput<Input>;
 
-    interface DataPacket {
+    export interface DataPacket {
         raw: Binary;
         bpio: BasicPacketIOBuilder;
         bpi: BasicPacketInputBuilder;
         app: Application;
     }
 
-    interface StatePacket {
+    export interface StatePacket {
         app: Application;
     }
 

@@ -86,7 +86,7 @@ namespace bser {
 
 	let bsonp = bson().BSON;
 
-	class Codec<T> {
+	export class Codec<T> {
 		private m_object: T;
 
 		constructor(object: T) {

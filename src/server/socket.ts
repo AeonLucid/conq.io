@@ -20,7 +20,7 @@ interface RawStatePacket {
     client: Client;
 }
 
-interface DataPacket {
+export interface DataPacket {
     from: Client;
     raw: Binary;
     bpio: BasicPacketIOBuilder;
@@ -28,7 +28,7 @@ interface DataPacket {
     app: Application;
 }
 
-interface StatePacket {
+export interface StatePacket {
     from: Client;
     app: Application;
 }
