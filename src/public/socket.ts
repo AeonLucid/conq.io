@@ -42,9 +42,9 @@ namespace wsw {
             return this.m_input!;
         }
 
-        public send(output: Output) {
+        public send(output: Output, main: number, sub: number) {
             let outputBinary = this.m_outputCodec.encode(output, padding);
-            this.m_app.send(outputBinary);
+            this.m_app.send(outputBinary, main, sub);
         }
     }
 
@@ -222,7 +222,8 @@ namespace wsw {
             this.m_socket = socket;
         }
 
-        public send(data: Binary) {
+        public send(data: Binary, main: number, sub: number) {
+            new DataView(data).setUint16(0, (main & 0x000F) << 12 | (sub & 0x0FFF)); 
             this.m_socket.send(data);
         }
     }

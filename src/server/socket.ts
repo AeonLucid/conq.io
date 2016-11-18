@@ -58,9 +58,9 @@ class BasicPacketIO<Input, Output> {
         return this.m_input!;
     }
 
-    public send(output: Output) {
+    public send(output: Output, main: number, sub: number) {
         let outputBinary = this.m_outputCodec.encode(output, padding);
-        this.m_app.send(outputBinary).where(this.m_client);
+        this.m_app.send(outputBinary, main, sub).where(this.m_client);
     }
 }
 
@@ -348,7 +348,9 @@ class Application {
         this.m_clients = clients;
     }
 
-    public send(data: Binary) {
+    public send(data: Binary, main: number, sub: number) {
+        new DataView(data).setUint16(0, (main & 0x000F) << 12 | (sub & 0x0FFF)); 
+
         return new ClientSelector(client => {
             this.m_out({ client: client, data: data });
         }, this.client);
