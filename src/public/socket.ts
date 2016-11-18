@@ -4,15 +4,88 @@ namespace wsw {
     
     type StateListener = (packet: StatePacket) => void;
     type PacketListener = (packet: DataPacket) => void;
+    type BasicPacketIOBuilder = <Input, Output>(inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>)
+        => BasicPacketIO<Input, Output>;
+    type BasicPacketInputBuilder = <Input>(inputCodec: bser.Codec<Input>) => BasicPacketInput<Input>;
 
     interface DataPacket {
         raw: Binary;
+        bpio: BasicPacketIOBuilder;
+        bpi: BasicPacketInputBuilder;
         app: Application;
     }
 
     interface StatePacket {
         app: Application;
     }
+
+    class BasicPacketIO<Input, Output> {
+        private m_app: Application;
+        private m_outputCodec: bser.Codec<Output>;
+        private m_input: Input | undefined;
+        private m_raw: Binary;
+
+        constructor(app: Application, raw: Binary, inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>) {
+            this.m_app = app;
+            this.m_outputCodec = outputCodec;
+            this.m_raw = raw;
+            this.m_input = inputCodec.decode(raw, padding);
+        }
+
+        public get valid() {
+            return this.m_input !== undefined;
+        }
+
+        public get input(): Input {
+            if (!this.valid)
+                throw new Error("Given packet is not valid");
+            return this.m_input!;
+        }
+
+        public send(output: Output) {
+            let outputBinary = this.m_outputCodec.encode(output, padding);
+            this.m_app.send(outputBinary);
+        }
+    }
+
+    class BasicPacketInput<Input> {
+        private m_app: Application;
+        private m_input: Input | undefined;
+        private m_raw: Binary;
+
+        constructor(app: Application, raw: Binary, inputCodec: bser.Codec<Input>) {
+            this.m_app = app;
+            this.m_raw = raw;
+            this.m_input = inputCodec.decode(raw, padding);
+        }
+
+        public get valid() {
+            return this.m_input !== undefined;
+        }
+
+        public get input(): Input {
+            if (!this.valid)
+                throw new Error("Given packet is not valid");
+            return this.m_input!;
+        }
+    }
+
+    function genBasicPacketIOBuilder(app: Application, raw: Binary): BasicPacketIOBuilder {
+        return function builder<Input, Output>
+            (inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>): BasicPacketIO<Input, Output> {
+            
+            return new BasicPacketIO<Input, Output>(app, raw, inputCodec, outputCodec);
+        }
+    }
+
+    function genBasicPacketInputBuilder(app: Application, raw: Binary): BasicPacketInputBuilder {
+        return function builder<Input>
+            (inputCodec: bser.Codec<Input>): BasicPacketInput<Input> {
+            
+            return new BasicPacketInput<Input>(app, raw, inputCodec);
+        }
+    }
+
 
     interface ResolverManagerObject {
         main: number;
@@ -177,7 +250,12 @@ namespace wsw {
 
                 let main = (header & 0xF000) >> 12;
                 let sub = header & 0x0FFF;
-                this.m_resolverManager.call(main, sub, { app: this.m_app, raw: data });
+                this.m_resolverManager.call(main, sub, {
+                    app: this.m_app,
+                    bpi: genBasicPacketInputBuilder(this.m_app, data),
+                    bpio: genBasicPacketIOBuilder(this.m_app, data), 
+                    raw: data 
+                });
             }
 
             this.m_socket.onopen = () => {

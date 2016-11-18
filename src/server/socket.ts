@@ -7,7 +7,9 @@ export const padding = 2;
 type StateListener = (packet: StatePacket) => void;
 type PacketListener = (packet: DataPacket) => void;
 type RawPacketListener = (packet: RawDataPacket) => void;
-type BasicPacketIOBuilder = <Input, Output>(inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>) => BasicPacketIO<Input, Output>;
+type BasicPacketIOBuilder = <Input, Output>(inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>)
+    => BasicPacketIO<Input, Output>;
+type BasicPacketInputBuilder = <Input>(inputCodec: bser.Codec<Input>) => BasicPacketInput<Input>;
 
 interface RawDataPacket {
     client: Client;
@@ -22,6 +24,7 @@ interface DataPacket {
     from: Client;
     raw: Binary;
     bpio: BasicPacketIOBuilder;
+    bpi: BasicPacketInputBuilder;
     app: Application;
 }
 
@@ -61,9 +64,43 @@ class BasicPacketIO<Input, Output> {
     }
 }
 
+class BasicPacketInput<Input> {
+    private m_app: Application;
+    private m_input: Input | undefined;
+    private m_client: Client;
+    private m_raw: Binary;
+
+    constructor(app: Application, client: Client, raw: Binary, inputCodec: bser.Codec<Input>) {
+        this.m_app = app;
+        this.m_client = client;
+        this.m_raw = raw;
+        this.m_input = inputCodec.decode(raw, padding);
+    }
+
+    public get valid() {
+        return this.m_input !== undefined;
+    }
+
+    public get input(): Input {
+        if (!this.valid)
+            throw new Error("Given packet is not valid");
+        return this.m_input!;
+    }
+}
+
 function genBasicPacketIOBuilder(app: Application, client: Client, raw: Binary): BasicPacketIOBuilder {
-    return function builder<Input, Output>(inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>): BasicPacketIO<Input, Output> {
+    return function builder<Input, Output>
+        (inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>): BasicPacketIO<Input, Output> {
+        
         return new BasicPacketIO<Input, Output>(app, client, raw, inputCodec, outputCodec);
+    }
+}
+
+function genBasicPacketInputBuilder(app: Application, client: Client, raw: Binary): BasicPacketInputBuilder {
+    return function builder<Input>
+        (inputCodec: bser.Codec<Input>): BasicPacketInput<Input> {
+        
+        return new BasicPacketInput<Input>(app, client, raw, inputCodec);
     }
 }
 
@@ -371,8 +408,11 @@ export class Server {
         let main = (header & 0xF000) >> 12;
         let sub = header & 0x0FFF;
         this.m_resolverManager.call(main, sub, {
-            app: this.m_app, bpio: genBasicPacketIOBuilder(this.m_app,
-                client, data), from: client, raw: data
+            app: this.m_app,
+            bpi: genBasicPacketInputBuilder(this.m_app, client, data),
+            bpio: genBasicPacketIOBuilder(this.m_app, client, data), 
+            from: client,
+            raw: data
         });
     }
 
