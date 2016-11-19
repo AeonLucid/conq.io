@@ -1,5 +1,3 @@
-import bser = require("./basic-serializer");
-
 export type Client = number;
 export type Binary = ArrayBuffer;
 export const padding = 2;
@@ -7,9 +5,9 @@ export const padding = 2;
 type StateListener = (packet: StatePacket) => void;
 type PacketListener = (packet: DataPacket) => void;
 type RawPacketListener = (packet: RawDataPacket) => void;
-type BasicPacketIOBuilder = <Input, Output>(inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>)
+type BasicPacketIOBuilder = <Input, Output>(inputCodec: Serializer<Input>, outputCodec: Serializer<Output>)
     => BasicPacketIO<Input, Output>;
-type BasicPacketInputBuilder = <Input>(inputCodec: bser.Codec<Input>) => BasicPacketInput<Input>;
+type BasicPacketInputBuilder = <Input>(inputCodec: Serializer<Input>) => BasicPacketInput<Input>;
 
 interface RawDataPacket {
     client: Client;
@@ -35,16 +33,21 @@ export interface StatePacket {
 
 class BasicPacketIO<Input, Output> {
     private m_app: Application;
-    private m_outputCodec: bser.Codec<Output>;
+    private m_outputCodec: Serializer<Output>;
     private m_input: Input | undefined;
     private m_client: Client;
     private m_raw: Binary;
+    private m_main: number;
+    private m_sub: number;
 
-    constructor(app: Application, client: Client, raw: Binary, inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>) {
+    constructor(app: Application, client: Client, raw: Binary, inputCodec: Serializer<Input>,
+        outputCodec: Serializer<Output>, main: number, sub: number) {
         this.m_app = app;
         this.m_outputCodec = outputCodec;
         this.m_client = client;
         this.m_raw = raw;
+        this.m_main = main;
+        this.m_sub = sub;
         this.m_input = inputCodec.decode(raw, padding);
     }
 
@@ -58,9 +61,9 @@ class BasicPacketIO<Input, Output> {
         return this.m_input!;
     }
 
-    public send(output: Output, main: number, sub: number) {
+    public send(output: Output) {
         let outputBinary = this.m_outputCodec.encode(output, padding);
-        this.m_app.send(outputBinary, main, sub).where(this.m_client);
+        this.m_app.send(outputBinary, this.m_main, this.m_sub).where(this.m_client);
     }
 }
 
@@ -70,7 +73,7 @@ class BasicPacketInput<Input> {
     private m_client: Client;
     private m_raw: Binary;
 
-    constructor(app: Application, client: Client, raw: Binary, inputCodec: bser.Codec<Input>) {
+    constructor(app: Application, client: Client, raw: Binary, inputCodec: Serializer<Input>) {
         this.m_app = app;
         this.m_client = client;
         this.m_raw = raw;
@@ -88,17 +91,19 @@ class BasicPacketInput<Input> {
     }
 }
 
-function genBasicPacketIOBuilder(app: Application, client: Client, raw: Binary): BasicPacketIOBuilder {
+function genBasicPacketIOBuilder(app: Application, client: Client, raw: Binary,
+    main: number, sub: number): BasicPacketIOBuilder {
+
     return function builder<Input, Output>
-        (inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>): BasicPacketIO<Input, Output> {
+        (inputCodec: Serializer<Input>, outputCodec: Serializer<Output>): BasicPacketIO<Input, Output> {
         
-        return new BasicPacketIO<Input, Output>(app, client, raw, inputCodec, outputCodec);
+        return new BasicPacketIO<Input, Output>(app, client, raw, inputCodec, outputCodec, main, sub);
     }
 }
 
 function genBasicPacketInputBuilder(app: Application, client: Client, raw: Binary): BasicPacketInputBuilder {
     return function builder<Input>
-        (inputCodec: bser.Codec<Input>): BasicPacketInput<Input> {
+        (inputCodec: Serializer<Input>): BasicPacketInput<Input> {
         
         return new BasicPacketInput<Input>(app, client, raw, inputCodec);
     }
@@ -288,7 +293,7 @@ class ClientProperty {
             }
         } else if (selection instanceof Function) {
             let selector = <(client: Client) => boolean>(selection);
-            result = [...this.m_clients].filter(client => !selector(client));
+            result = [...this.m_clients].filter(client => selector(client));
         } else {
             let client = <Client>(selection);
             result.push(client);
@@ -356,9 +361,20 @@ class Application {
         }, this.client);
     }
 
+    public serialize<T>(codec: Serializer<T>, main: number, sub: number) {
+        return (object: T) => {
+            return this.send(codec.encode(object, padding), main, sub);
+        }
+    }
+
     public get client() {
         return new ClientProperty(this.m_clients);
     }
+}
+
+export abstract class Serializer<T> {
+	public abstract encode(object: T, padding: number): ArrayBuffer;
+    public abstract decode(binary: ArrayBuffer, padding: number): T | undefined;
 }
 
 export class Server {
@@ -412,7 +428,7 @@ export class Server {
         this.m_resolverManager.call(main, sub, {
             app: this.m_app,
             bpi: genBasicPacketInputBuilder(this.m_app, client, data),
-            bpio: genBasicPacketIOBuilder(this.m_app, client, data), 
+            bpio: genBasicPacketIOBuilder(this.m_app, client, data, main, sub), 
             from: client,
             raw: data
         });

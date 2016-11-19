@@ -1,17 +1,18 @@
 import bson = require("bson");
+import wsw = require("./socket");
 
 function validateObject(check: any, object: any, level: number): boolean {
 	const type = "object";
 	if (typeof check !== type || typeof object !== type)
 		return false;
 
-	let checkKeys = Object.keys(check);
-	let objectKeys = Object.keys(object);
+	let checkKeys = Object.keys(check).sort();
+	let objectKeys = Object.keys(object).sort();
 
 	if (checkKeys.length !== objectKeys.length)
 		return false;
-	let count = objectKeys.length;
 
+	let count = objectKeys.length;
 	for (let index = 0; index < count; index++) {
 		let checkElement = check[checkKeys[index]];
 		let objectElement = object[objectKeys[index]];
@@ -20,7 +21,6 @@ function validateObject(check: any, object: any, level: number): boolean {
 		if (!good)
 			return false;
 	}
-
 	return true;
 }
 
@@ -76,19 +76,20 @@ function toArrayBuffer(buffer: Buffer, padding: number = 0): ArrayBuffer {
 }
 
 function toNativeBuffer(buffer: ArrayBuffer, padding: number = 0): Buffer {
-	let result = new Buffer(buffer.byteLength + padding);
+	let result = new Buffer(buffer.byteLength - padding);
 	let view = new Uint8Array(buffer);
-	for (let i = 0; i < buffer.byteLength; ++i)
-		result[i + padding] = view[i];
-	return result;	
+	for (let i = 0; i < view.length; ++i)
+		result[i] = view[i + padding];
+	return result;
 }
 
 let bsonp = new bson.BSONPure.BSON();
 
-export class Codec<T> {
+class Serializer<T> extends wsw.Serializer<T> {
 	private m_object: T;
 
 	constructor(object: T) {
+		super();
 		this.m_object = object;
 	}
 
@@ -102,7 +103,7 @@ export class Codec<T> {
 			let buffer = toNativeBuffer(binary, padding);
 			let object = bsonp.deserialize(buffer);
 			if (!object)
-				return undefined
+				return undefined;
 			if (!this.validate(object))
 				return undefined;
 
@@ -117,6 +118,6 @@ export class Codec<T> {
 	}
 }
 
-export function gen<T>(object: T): Codec<T> {
-	return new Codec<T>(object);
+export function gen<T>(object: T): Serializer<T> {
+	return new Serializer<T>(object);
 }

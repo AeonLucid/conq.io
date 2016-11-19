@@ -21,7 +21,6 @@ namespace bser {
 			if (!good)
 				return false;
 		}
-
 		return true;
 	}
 
@@ -60,11 +59,9 @@ namespace bser {
 			let objectElement = objectArray[index];
 			let good = validatePrimitive(checkElement, objectElement, level + 1) ||
 				validateArray(checkElement, objectElement, level + 1) || validateObject(checkElement, objectElement, level + 1);
-
 			if (!good)
 				return false;
 		}
-
 		return true;
 	}
 
@@ -77,19 +74,21 @@ namespace bser {
 	}
 
 	function toNativeBuffer(buffer: ArrayBuffer, padding: number = 0): Uint8Array {
-		let result = new Uint8Array(buffer.byteLength);
+		let result = new Uint8Array(buffer.byteLength - 2);
 		let view = new Uint8Array(buffer);
-		for (let i = 0; i < buffer.byteLength; ++i)
+
+		for (let i = 0; i < result.length; ++i)
 			result[i] = view[i + padding];
-		return result;	
+		return result;
 	}
 
 	let bsonp = bson().BSON;
 
-	export class Codec<T> {
+	export class Serializer<T> extends wsw.Serializer<T> {
 		private m_object: T;
 
 		constructor(object: T) {
+			super();
 			this.m_object = object;
 		}
 
@@ -106,7 +105,6 @@ namespace bser {
 					return undefined
 				if (!this.validate(object))
 					return undefined;
-
 				return <T>object;
 			} catch (err) {
 				console.log(err);
@@ -119,7 +117,7 @@ namespace bser {
 		}
 	}
 
-	export function gen<T>(object: T): Codec<T> {
-		return new Codec<T>(object);
+	export function gen<T>(object: T): Serializer<T> {
+		return new Serializer<T>(object);
 	}
 }

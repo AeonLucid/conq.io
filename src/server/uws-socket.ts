@@ -3,7 +3,7 @@ import http = require("http");
 
 let uws = require("uws");
 
-export class Socket {
+class Socket {
     private m_socket: any;
     private m_clients: { client: wsw.Client, socket: any }[];
     private m_handler: wsw.SocketHandler;
@@ -23,9 +23,8 @@ export class Socket {
 
         this.m_socket.on("connection", socket => {
             Socket.initSocket(socket);
-            this.m_handler.connect(Socket.getIdentifier(socket));
             this.m_clients.push({ client: Socket.getIdentifier(socket), socket: socket });
-
+            this.m_handler.connect(Socket.getIdentifier(socket));
             socket.on("message", packet => {
                 if (packet instanceof ArrayBuffer)
                     this.m_handler.packet(Socket.getIdentifier(socket), <ArrayBuffer>packet);
@@ -56,4 +55,8 @@ export class Socket {
     private static getIdentifier(socket: any): number {
         return <number>(socket.__$identifier);
     }
+}
+
+export = function (server: http.Server) {
+    return new Socket(server);
 }

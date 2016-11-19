@@ -4,9 +4,9 @@ namespace wsw {
     
     type StateListener = (packet: StatePacket) => void;
     type PacketListener = (packet: DataPacket) => void;
-    type BasicPacketIOBuilder = <Input, Output>(inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>)
+    type BasicPacketIOBuilder = <Input, Output>(inputCodec: Serializer<Input>, outputCodec: Serializer<Output>)
         => BasicPacketIO<Input, Output>;
-    type BasicPacketInputBuilder = <Input>(inputCodec: bser.Codec<Input>) => BasicPacketInput<Input>;
+    type BasicPacketInputBuilder = <Input>(inputCodec: Serializer<Input>) => BasicPacketInput<Input>;
 
     export interface DataPacket {
         raw: Binary;
@@ -21,14 +21,20 @@ namespace wsw {
 
     class BasicPacketIO<Input, Output> {
         private m_app: Application;
-        private m_outputCodec: bser.Codec<Output>;
+        private m_outputCodec: Serializer<Output>;
         private m_input: Input | undefined;
         private m_raw: Binary;
+        private m_main: number;
+        private m_sub: number;
 
-        constructor(app: Application, raw: Binary, inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>) {
+        constructor(app: Application, raw: Binary, inputCodec: Serializer<Input>,
+            outputCodec: Serializer<Output>, main: number, sub: number) {
+                
             this.m_app = app;
             this.m_outputCodec = outputCodec;
             this.m_raw = raw;
+            this.m_main = main;
+            this.m_sub = sub;
             this.m_input = inputCodec.decode(raw, padding);
         }
 
@@ -42,9 +48,9 @@ namespace wsw {
             return this.m_input!;
         }
 
-        public send(output: Output, main: number, sub: number) {
+        public send(output: Output) {
             let outputBinary = this.m_outputCodec.encode(output, padding);
-            this.m_app.send(outputBinary, main, sub);
+            this.m_app.send(outputBinary, this.m_main, this.m_sub);
         }
     }
 
@@ -53,7 +59,7 @@ namespace wsw {
         private m_input: Input | undefined;
         private m_raw: Binary;
 
-        constructor(app: Application, raw: Binary, inputCodec: bser.Codec<Input>) {
+        constructor(app: Application, raw: Binary, inputCodec: Serializer<Input>) {
             this.m_app = app;
             this.m_raw = raw;
             this.m_input = inputCodec.decode(raw, padding);
@@ -70,22 +76,21 @@ namespace wsw {
         }
     }
 
-    function genBasicPacketIOBuilder(app: Application, raw: Binary): BasicPacketIOBuilder {
+    function genBasicPacketIOBuilder(app: Application, raw: Binary, main: number, sub: number): BasicPacketIOBuilder {
         return function builder<Input, Output>
-            (inputCodec: bser.Codec<Input>, outputCodec: bser.Codec<Output>): BasicPacketIO<Input, Output> {
+            (inputCodec: Serializer<Input>, outputCodec: Serializer<Output>): BasicPacketIO<Input, Output> {
             
-            return new BasicPacketIO<Input, Output>(app, raw, inputCodec, outputCodec);
+            return new BasicPacketIO<Input, Output>(app, raw, inputCodec, outputCodec, main, sub);
         }
     }
 
     function genBasicPacketInputBuilder(app: Application, raw: Binary): BasicPacketInputBuilder {
         return function builder<Input>
-            (inputCodec: bser.Codec<Input>): BasicPacketInput<Input> {
+            (inputCodec: Serializer<Input>): BasicPacketInput<Input> {
             
             return new BasicPacketInput<Input>(app, raw, inputCodec);
         }
     }
-
 
     interface ResolverManagerObject {
         main: number;
@@ -226,6 +231,17 @@ namespace wsw {
             new DataView(data).setUint16(0, (main & 0x000F) << 12 | (sub & 0x0FFF)); 
             this.m_socket.send(data);
         }
+
+        public serialize<T>(codec: Serializer<T>, main: number, sub: number) {
+            return (object: T) => {
+                this.send(codec.encode(object, padding), main, sub);
+            }
+        }
+    }
+    
+    export abstract class Serializer<T> {
+        public abstract encode(object: T, padding: number): ArrayBuffer;
+        public abstract decode(binary: ArrayBuffer, padding: number): T | undefined;
     }
 
     export class Socket {
@@ -254,7 +270,7 @@ namespace wsw {
                 this.m_resolverManager.call(main, sub, {
                     app: this.m_app,
                     bpi: genBasicPacketInputBuilder(this.m_app, data),
-                    bpio: genBasicPacketIOBuilder(this.m_app, data), 
+                    bpio: genBasicPacketIOBuilder(this.m_app, data, main, sub), 
                     raw: data 
                 });
             }
