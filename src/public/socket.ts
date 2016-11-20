@@ -1,7 +1,7 @@
 namespace wsw {
     export type Binary = ArrayBuffer;
     export let padding = 2;
-    
+
     type StateListener = (packet: StatePacket) => void;
     type PacketListener = (packet: DataPacket) => void;
     type BasicPacketIOBuilder = <Input, Output>(inputCodec: Serializer<Input>, outputCodec: Serializer<Output>)
@@ -29,7 +29,7 @@ namespace wsw {
 
         constructor(app: Application, raw: Binary, inputCodec: Serializer<Input>,
             outputCodec: Serializer<Output>, main: number, sub: number) {
-                
+
             this.m_app = app;
             this.m_outputCodec = outputCodec;
             this.m_raw = raw;
@@ -79,7 +79,7 @@ namespace wsw {
     function genBasicPacketIOBuilder(app: Application, raw: Binary, main: number, sub: number): BasicPacketIOBuilder {
         return function builder<Input, Output>
             (inputCodec: Serializer<Input>, outputCodec: Serializer<Output>): BasicPacketIO<Input, Output> {
-            
+
             return new BasicPacketIO<Input, Output>(app, raw, inputCodec, outputCodec, main, sub);
         }
     }
@@ -87,7 +87,7 @@ namespace wsw {
     function genBasicPacketInputBuilder(app: Application, raw: Binary): BasicPacketInputBuilder {
         return function builder<Input>
             (inputCodec: Serializer<Input>): BasicPacketInput<Input> {
-            
+
             return new BasicPacketInput<Input>(app, raw, inputCodec);
         }
     }
@@ -228,7 +228,7 @@ namespace wsw {
         }
 
         public send(data: Binary, main: number, sub: number) {
-            new DataView(data).setUint16(0, (main & 0x000F) << 12 | (sub & 0x0FFF)); 
+            new DataView(data).setUint16(0, (main & 0x000F) << 12 | (sub & 0x0FFF));
             this.m_socket.send(data);
         }
 
@@ -238,7 +238,7 @@ namespace wsw {
             }
         }
     }
-    
+
     export abstract class Serializer<T> {
         public abstract encode(object: T, padding: number): ArrayBuffer;
         public abstract decode(binary: ArrayBuffer, padding: number): T | undefined;
@@ -270,8 +270,8 @@ namespace wsw {
                 this.m_resolverManager.call(main, sub, {
                     app: this.m_app,
                     bpi: genBasicPacketInputBuilder(this.m_app, data),
-                    bpio: genBasicPacketIOBuilder(this.m_app, data, main, sub), 
-                    raw: data 
+                    bpio: genBasicPacketIOBuilder(this.m_app, data, main, sub),
+                    raw: data
                 });
             }
 
@@ -289,6 +289,10 @@ namespace wsw {
         public get on() {
             return new ResolverProperty(this.m_resolverManager,
                 this.m_openListener, this.m_closeListener);
+        }
+
+        public get app() {
+            return this.m_app;
         }
     }
 }
