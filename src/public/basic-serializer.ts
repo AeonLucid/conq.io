@@ -6,8 +6,8 @@ namespace bser {
 		if (typeof check !== type || typeof object !== type)
 			return false;
 
-		let checkKeys = Object.keys(check);
-		let objectKeys = Object.keys(object);
+		let checkKeys = Object.keys(check).sort();
+		let objectKeys = Object.keys(object).sort();
 
 		if (checkKeys.length !== objectKeys.length)
 			return false;

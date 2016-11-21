@@ -10,9 +10,25 @@ interface Tank {
 	position: vec2;
 	velocity: vec2;
 	name: string;
-	health: number;
-	angle: number;
 }
+
+interface StateUpdate {
+	user: Tank;
+	players: Tank[];
+}
+
+interface ClientIdentify {
+	name: string;
+}
+
+interface ClientInput {
+	input: number[];
+}
+
+let StateUpdateCodec = bser.gen<StateUpdate>({ user: { name: "", position: vec2.zero, velocity: vec2.zero },
+	players: [ { name: "", position: vec2.zero, velocity: vec2.zero } ] });
+let ClientIdentifyCodec = bser.gen<ClientIdentify>({ name: "" });
+let ClientInputCodec = bser.gen<ClientInput>({ input: [ 0 ] });
 
 class ClientKeyboard {
 	private m_input: number;
@@ -87,11 +103,34 @@ class ConcreteEngine extends render.BasicEngine {
 	private m_keys: Set<number>;
 	private m_socket: wsw.Socket;
 	private m_user: Tank;
+	private m_players: Tank[];
+	private m_input: number[];
 
 	protected init(g: render.Graphics, window: render.Window): void {
 		this.m_keys = new Set<number>();
-		this.m_user = { position: vec2.zero, velocity: vec2.zero, angle: 0, health: 1, name: "Elsa" };
+		this.m_user = { position: vec2.zero, velocity: vec2.zero, name: "" };
+		this.m_players = [];
 		this.m_socket = new wsw.Socket("ws://localhost:3000");
+		this.m_input = [];
+
+		let on = this.m_socket.on;
+
+		on.open.do(event => {
+			let send = event.app.serialize(ClientIdentifyCodec, 0x01, 0x00);
+			send({ name: "WUT" });
+		});
+
+		on.game(0x01).do(event => {			
+			let bpio = event.bpio(StateUpdateCodec, ClientInputCodec);
+			if (!bpio.valid)
+				return;
+
+			this.m_user = bpio.input.user;
+			this.m_players = bpio.input.players;
+
+			bpio.send({ input: this.m_input });
+			this.m_input = [];
+		});
 
 		body.onkeydown = event => {
 			this.m_keys.add(event.keyCode);
@@ -104,32 +143,9 @@ class ConcreteEngine extends render.BasicEngine {
 
 	protected update(deltatime: number, window: render.Window): void {
 		let keys = getKeyboardInput(this.m_keys);
-
-		engine(this.m_user, deltatime, input(keys));
-
-		function input(input: ClientKeyboard) {
-			let result = vec2.zero;
-			let force = 6.351;
-
-			result.x -= input.left ? 1 : 0;
-			result.x += input.right ? 1 : 0;
-			result.y += input.up ? 1 : 0;
-			result.y -= input.down ? 1 : 0;
-
-			if (result.x === 0 && result.y === 0)
-				return vec2.zero;
-			
-			return vec2.scale(force, vec2.normalize(result));
-		}
-
-		function engine(tank: Tank, deltatime: number, acc: vec2) {
-			let dt = deltatime;
-			let momentum = 0.93;
-
-			tank.velocity = vec2.add(tank.velocity, vec2.scale(dt, acc));
-			tank.position = vec2.add(tank.position, vec2.scale(dt, tank.velocity));
-			tank.velocity = vec2.scale(momentum, tank.velocity);
-		}
+		if (this.m_input.length > 3)
+			return;
+		this.m_input.push(keys.binary);
 	}
 
 	protected fixedupdate(deltatime: number, window: render.Window): void { }
@@ -138,6 +154,10 @@ class ConcreteEngine extends render.BasicEngine {
 		sg.stroke(false).fill("#303030").prect(-vp.aspect, -1, 2 * vp.aspect, 2);
 
 		sg.stroke(true).stroke("#2E15A2").fill("#0E15A0").ellipse(this.m_user.position, 0.1);
+
+		for (let player of this.m_players) {		
+			sg.stroke(true).stroke("#8E15A8").fill("#AE15AA").ellipse(player.position, 0.1);
+		}
 	}
 
 	protected rendertext(sg: render.SimpleGraphics, deltatime: number, window: render.Window, vp: render.Viewport): void { }

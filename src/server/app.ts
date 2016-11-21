@@ -10,6 +10,9 @@ import util = require("./utilities");
 export let app: express_core.Express;
 export let server: http.Server;
 
+let vec2 = mvec.vec2;
+type vec2 = mvec.vec2;
+
 export function init() {
 	// Initialize file routers
 	app.get("/", (req, res) => {
@@ -21,12 +24,167 @@ export function init() {
 	console.log("Server is running");
 }
 
+let StateUpdateCodec = bser.gen<StateUpdate>({ user: { name: "", position: vec2.zero, velocity: vec2.zero },
+	players: [ { name: "", position: vec2.zero, velocity: vec2.zero } ] });
+let ClientIdentifyCodec = bser.gen<ClientIdentify>({ name: "" });
+let ClientInputCodec = bser.gen<ClientInput>({ input: [ 0 ] });
+
 function main() {
 	let handler = uws(server);
 	let socket = new wsw.Server(handler.handler);
-	const deltatime = 1000 / 60;
+	let tanks: { tank: Tank, input: ClientInput, key: wsw.Client }[] = [];
+	const deltatime = 1000 / 20;
+
+	socket.on.open.do(event => {
+		tanks[event.from] = {
+			tank: { name: "Unnamed", position: vec2.zero, velocity: vec2.zero },
+			input: { input: [ 0, 0, 0, 0] },
+			key: event.from
+		};
+	});
+
+	socket.on.game(0x00).do(event => {
+		let bpi = event.bpi(ClientIdentifyCodec);
+	
+		if (!bpi.valid)
+			return;
+		tanks[event.from].tank.name = bpi.input.name;
+	});
+
+	socket.on.game(0x01).do(event => {
+		let bpi = event.bpi(ClientInputCodec);
+		if (!bpi.valid || bpi.input.input.length > 4 || bpi.input.input.length === 0)
+			return;
+
+		let kkk = bpi.input.input.length - 1;
+		for (let i = kkk; i < 4; ++i) {
+			bpi.input.input[i] = bpi.input.input[kkk];
+		}
+
+		tanks[event.from].input = bpi.input;
+	});
 
 	new util.HighResolutionTimer(deltatime, timer => {
+		for (let entity of tanks) {
+			for (let i = 0; i < 4; ++i) {
+				engine(entity.tank, deltatime, input(new ClientKeyboard(entity.input.input[i])));
+			}
+		}
 
+		for (let entityKey of tanks.keys()) {
+			let entity = tanks[entityKey];
+			let players: Tank[] = [];
+			for (let element of tanks) {
+				if (element.key === entityKey)
+					continue;
+				players.push(element.tank);
+			}
+
+			let send = socket.app.serialize(StateUpdateCodec, 0x01, 0x01);
+			send({ players: players, user: entity.tank }).where(entityKey);
+		}
+
+		function input(input: ClientKeyboard) {
+			let result = vec2.zero;
+			let force = 0.351;
+
+			result.x -= input.left ? 1 : 0;
+			result.x += input.right ? 1 : 0;
+			result.y += input.up ? 1 : 0;
+			result.y -= input.down ? 1 : 0;
+
+			if (result.x === 0 && result.y === 0)
+				return vec2.zero;
+			
+			return vec2.scale(force, vec2.normalize(result));
+		}
+
+		function engine(tank: Tank, deltatime: number, acc: vec2) {
+			let dt = deltatime / 1000;
+			let momentum = 0.93;
+
+			tank.velocity = vec2.add(tank.velocity, vec2.scale(dt, acc));
+			tank.position = vec2.add(tank.position, vec2.scale(dt, tank.velocity));
+			tank.velocity = vec2.scale(momentum, tank.velocity);
+		}
 	}).run();
+}
+
+interface Tank {
+	position: vec2;
+	velocity: vec2;
+	name: string;
+}
+
+interface StateUpdate {
+	user: Tank;
+	players: Tank[];
+}
+
+interface ClientIdentify {
+	name: string;
+}
+
+interface ClientInput {
+	input: number[];
+}
+
+class ClientKeyboard {
+	private m_input: number;
+
+	constructor(input: number = 0) {
+		this.m_input = input & 0xF;
+	}
+
+	public get left(): boolean {
+		return this.get(0);
+	}
+
+	public get right(): boolean {
+		return this.get(1);
+	}
+
+	public get up(): boolean {
+		return this.get(2);
+	}
+
+	public get down(): boolean {
+		return this.get(3);
+	}
+
+	public set left(value: boolean) {
+		this.put(0, value);
+	}
+
+	public set right(value: boolean) {
+		this.put(1, value);
+	}
+	
+	public set up(value: boolean) {
+		this.put(2, value);
+	}
+
+	public set down(value: boolean) {
+		this.put(3, value);
+	}
+
+	public get binary(): number {
+		return this.m_input & 0xF;
+	}
+
+	private get(k: number): boolean {
+		return ((this.m_input >> k) & 1) === 1 ? true : false;
+	}
+
+	private set(k: number) {
+		this.m_input |= (1 << k);
+	}
+
+	private clear(k: number) {
+		this.m_input &= ~(1 << k);
+	}
+
+	private put(k: number, v: boolean) {
+		if (v) this.set(k); else this.clear(k);
+	}
 }

@@ -39,8 +39,8 @@ gulp.task("build-client", function () {
         .pipe(print())
         .pipe(gts(tsconfig))
         .pipe(concat("script.js"))
-        .pipe(babel(bbonfig))
-        .pipe(uglify())
+        //.pipe(babel(bbonfig))
+        //.pipe(uglify())
         .pipe(gulp.dest("dist/public"));
     return res;
 });
@@ -49,8 +49,8 @@ gulp.task("build-client", function () {
 gulp.task("build-server", function () {
     var res = gulp.src("src/server/**/*.ts")
         .pipe(gts(tsconfig))
-        .pipe(babel(bbonfig))
-        .pipe(uglify())
+        //.pipe(babel(bbonfig))
+        //.pipe(uglify())
         .pipe(gulp.dest("dist/server"));
     return res;
 });
