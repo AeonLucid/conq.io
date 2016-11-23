@@ -2,8 +2,8 @@ namespace mvec {
 	export class vec2 {
 		constructor(public x: number, public y: number) { }
 
-		public copy(): vec2 {
-			return new vec2(this.x, this.y);
+		public static copy(v: vec2): vec2 {
+			return new vec2(v.x, v.y);
 		}
 
 		public static add(lhs: vec2, rhs: vec2): vec2 {

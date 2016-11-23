@@ -4,12 +4,14 @@ let body: HTMLElement = document.body;
 let engine: ConcreteEngine;
 
 let vec2 = mvec.vec2;
+let displayname: string = "Unnamed";
 type vec2 = mvec.vec2;
 
 interface Tank {
 	position: vec2;
 	velocity: vec2;
 	name: string;
+	id: number;
 }
 
 interface StateUpdate {
@@ -25,8 +27,8 @@ interface ClientInput {
 	input: number[];
 }
 
-let StateUpdateCodec = bser.gen<StateUpdate>({ user: { name: "", position: vec2.zero, velocity: vec2.zero },
-	players: [ { name: "", position: vec2.zero, velocity: vec2.zero } ] });
+let StateUpdateCodec = bser.gen<StateUpdate>({ user: { name: "", position: vec2.zero, velocity: vec2.zero, id: 0 },
+	players: [ { name: "", position: vec2.zero, velocity: vec2.zero, id: 0 } ] });
 let ClientIdentifyCodec = bser.gen<ClientIdentify>({ name: "" });
 let ClientInputCodec = bser.gen<ClientInput>({ input: [ 0 ] });
 
@@ -99,25 +101,89 @@ function getKeyboardInput(arr: Set<number>) {
 	return keys;
 }
 
+class PlayerOffset {
+	private m_currPosition: vec2;
+	private m_destPosition: vec2;
+
+	constructor(position: vec2) {
+		this.m_currPosition = vec2.copy(position);
+		this.m_destPosition = vec2.copy(position);
+	}
+
+	public update(factor: number) {
+		let difference = vec2.subtract(this.m_destPosition, this.m_currPosition);
+		this.m_currPosition = vec2.add(this.m_currPosition, vec2.scale(factor, difference));
+	}
+
+	public set destination(position: vec2) {
+		this.m_destPosition = vec2.copy(position);
+	}
+
+	public get current() {
+		return this.m_currPosition;
+	}
+}
+
+class Interpolate {
+	private m_beforePosition: vec2;
+	private m_afterPosition: vec2;
+	private m_id: number;
+	private m_name: string;
+
+	constructor(position: vec2, id: number, name: string) {
+		this.m_beforePosition = vec2.copy(position);
+		this.m_afterPosition = vec2.copy(position);
+		this.m_name = name;
+		this.m_id = id;
+	}
+
+	public update(position: vec2) {
+		this.m_beforePosition = this.m_afterPosition;
+		this.m_afterPosition = vec2.copy(position);
+	}
+
+	public current(time: number) {
+		return vec2.add(vec2.scale(1 - time, this.m_beforePosition), vec2.scale(time, this.m_afterPosition));
+	}
+
+	public get id() {
+		return this.m_id;
+	}
+
+	public get name() {
+		return this.m_name;
+	}
+}
+
 class ConcreteEngine extends render.BasicEngine {
 	private m_keys: Set<number>;
 	private m_socket: wsw.Socket;
+	private m_input: number[];
+	private m_offset: PlayerOffset;
 	private m_user: Tank;
 	private m_players: Tank[];
-	private m_input: number[];
+	private m_timeInterpolation: number;
+	private m_userInt: Interpolate;
+	private m_playersInt: Interpolate[];
 
 	protected init(g: render.Graphics, window: render.Window): void {
 		this.m_keys = new Set<number>();
-		this.m_user = { position: vec2.zero, velocity: vec2.zero, name: "" };
+		this.m_user = { position: vec2.zero, velocity: vec2.zero, name: "", id: 0 };
 		this.m_players = [];
-		this.m_socket = new wsw.Socket("ws://localhost:3000");
+		//this.m_socket = new wsw.Socket("wss://conq-io.herokuapp.com/");
+		this.m_socket = new wsw.Socket("ws://localhost:3000/");
+		
 		this.m_input = [];
+		this.m_offset = new PlayerOffset(this.m_user.position);
+		this.m_userInt = new Interpolate(vec2.zero, 0, "You");
+		this.m_timeInterpolation = 0;
+		this.m_playersInt = [];
 
 		let on = this.m_socket.on;
 
 		on.open.do(event => {
 			let send = event.app.serialize(ClientIdentifyCodec, 0x01, 0x00);
-			send({ name: "WUT" });
+			send({ name: displayname });
 		});
 
 		on.game(0x01).do(event => {			
@@ -125,8 +191,33 @@ class ConcreteEngine extends render.BasicEngine {
 			if (!bpio.valid)
 				return;
 
+			this.m_userInt = new Interpolate(this.m_userInt.current(this.m_timeInterpolation), 0, "You");
+			this.m_userInt.update(bpio.input.user.position);
+
+			let res: Interpolate[] = [];
+			for (let player of this.m_players) {
+				let found = false;
+				for (let playerInt of this.m_playersInt) {
+					if (player.id === playerInt.id) {
+						let int = new Interpolate(playerInt.current(this.m_timeInterpolation), player.id, player.name); 
+						int.update(player.position);
+						
+						res.push(int);
+						found = true;
+						break;
+					}
+				}
+
+				if (found)
+					continue;
+				let int = new Interpolate(player.position, player.id, player.name); 
+				res.push(int);				
+			}
+
+			this.m_playersInt = res;
 			this.m_user = bpio.input.user;
 			this.m_players = bpio.input.players;
+			this.m_timeInterpolation = 0;
 
 			bpio.send({ input: this.m_input });
 			this.m_input = [];
@@ -142,10 +233,18 @@ class ConcreteEngine extends render.BasicEngine {
 	}
 
 	protected update(deltatime: number, window: render.Window): void {
+		this.m_offset.destination = this.m_userInt.current(this.m_timeInterpolation);
+		this.m_timeInterpolation += deltatime * 15;
+		if (this.m_timeInterpolation >= 1) {
+			this.m_timeInterpolation = 1;
+		}
+		console.log(this.m_timeInterpolation);
+
 		let keys = getKeyboardInput(this.m_keys);
 		if (this.m_input.length > 3)
 			return;
 		this.m_input.push(keys.binary);
+		this.m_offset.update(0.03);
 	}
 
 	protected fixedupdate(deltatime: number, window: render.Window): void { }
@@ -153,14 +252,35 @@ class ConcreteEngine extends render.BasicEngine {
 	protected render(sg: render.SimpleGraphics, deltatime: number, window: render.Window, vp: render.Viewport): void {
 		sg.stroke(false).fill("#303030").prect(-vp.aspect, -1, 2 * vp.aspect, 2);
 
-		sg.stroke(true).stroke("#2E15A2").fill("#0E15A0").ellipse(this.m_user.position, 0.1);
+		let transform = this.m_offset.current;
+		sg.stroke(true).stroke("#2E15A2").fill("#0E15A0").ellipse(vec2.add(vec2.subtract(this.m_userInt.current(this.m_timeInterpolation), transform), new vec2(-0.08, 0)), 0.16);
 
-		for (let player of this.m_players) {		
-			sg.stroke(true).stroke("#8E15A8").fill("#AE15AA").ellipse(player.position, 0.1);
+		for (let player of this.m_playersInt) {		
+			sg.stroke(true).stroke("#8E15A8").fill("#AE15AA").ellipse(vec2.add(vec2.subtract(player.current(this.m_timeInterpolation), transform), new vec2(-0.08, 0)), 0.16);
 		}
 	}
 
-	protected rendertext(sg: render.SimpleGraphics, deltatime: number, window: render.Window, vp: render.Viewport): void { }
+	protected rendertext(sg: render.SimpleGraphics, deltatime: number, window: render.Window, vp: render.Viewport): void {
+		let transform = this.m_offset.current;
+		sg.fill("#FFFFFF");
+		sg.stroke("#000000");
+		sg.g.textAlign = "center";
+		sg.g.textBaseline = "middle";
+		sg.g.font = 'normal bold 24px monospace';
+		sg.g.lineWidth = 1;
+		for (let player of this.m_playersInt) {		
+			let ps = vec2.subtract(player.current(this.m_timeInterpolation), transform);
+			let offset = sg.g.measureText(player.name).width / 2;
+
+			sg.g.fillText(player.name, vp.px(ps.x), vp.py(-(ps.y + 0.22)));
+			sg.g.strokeText(player.name, vp.px(ps.x), vp.py(-(ps.y + 0.22)));
+
+		}
+	}
+}
+
+function getParam(name: string) {
+    return decodeURIComponent((new RegExp('[?|&]' + name + '=' + '([^&;]+?)(&|#|;|$)').exec(location.search) || [undefined, ''])[1]!.replace(/\+/g, '%20')) || undefined;
 }
 
 function resizeCanvas() {
@@ -179,6 +299,10 @@ class Startup {
 		let context = canvas.getContext("2d");
 		let g = <render.Graphics>context;
 
+		let displayname_ = getParam("name");
+		if (displayname_)
+			displayname = displayname_;
+
 		engine = new ConcreteEngine(g, canvas);
 		resizeCanvas();
 		(() => {
@@ -194,3 +318,4 @@ class Startup {
 }
 
 Startup.main();
+

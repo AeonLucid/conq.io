@@ -24,8 +24,8 @@ export function init() {
 	console.log("Server is running");
 }
 
-let StateUpdateCodec = bser.gen<StateUpdate>({ user: { name: "", position: vec2.zero, velocity: vec2.zero },
-	players: [ { name: "", position: vec2.zero, velocity: vec2.zero } ] });
+let StateUpdateCodec = bser.gen<StateUpdate>({ user: { name: "", position: vec2.zero, velocity: vec2.zero, id: 0 },
+	players: [ { name: "", position: vec2.zero, velocity: vec2.zero, id: 0 } ] });
 let ClientIdentifyCodec = bser.gen<ClientIdentify>({ name: "" });
 let ClientInputCodec = bser.gen<ClientInput>({ input: [ 0 ] });
 
@@ -36,11 +36,11 @@ function main() {
 	const deltatime = 1000 / 20;
 
 	socket.on.open.do(event => {
-		tanks[event.from] = {
-			tank: { name: "Unnamed", position: vec2.zero, velocity: vec2.zero },
+		tanks.push({
+			tank: { name: "Unnamed", position: vec2.zero, velocity: vec2.zero, id: event.from },
 			input: { input: [ 0, 0, 0, 0] },
 			key: event.from
-		};
+		});
 	});
 
 	socket.on.game(0x00).do(event => {
@@ -48,7 +48,12 @@ function main() {
 	
 		if (!bpi.valid)
 			return;
-		tanks[event.from].tank.name = bpi.input.name;
+			
+		for (let tank of tanks) {
+			if (tank.key === event.from) {
+				tank.tank.name = bpi.input.name;
+			}
+		}
 	});
 
 	socket.on.game(0x01).do(event => {
@@ -61,7 +66,20 @@ function main() {
 			bpi.input.input[i] = bpi.input.input[kkk];
 		}
 
-		tanks[event.from].input = bpi.input;
+		for (let tank of tanks) {
+			if (tank.key === event.from) {
+				tank.input = bpi.input;
+			}
+		}
+	});
+
+	socket.on.close.do(event => {
+		for (let i = 0; i < tanks.length; i++) {
+			if (tanks[i].key === event.from) {
+				tanks.splice(i, 1);
+				return;
+			}
+		}
 	});
 
 	new util.HighResolutionTimer(deltatime, timer => {
@@ -71,17 +89,17 @@ function main() {
 			}
 		}
 
-		for (let entityKey of tanks.keys()) {
-			let entity = tanks[entityKey];
+		for (let tank of tanks) {
+			let entity = tank;
 			let players: Tank[] = [];
 			for (let element of tanks) {
-				if (element.key === entityKey)
+				if (element.key === entity.key)
 					continue;
 				players.push(element.tank);
 			}
 
 			let send = socket.app.serialize(StateUpdateCodec, 0x01, 0x01);
-			send({ players: players, user: entity.tank }).where(entityKey);
+			send({ players: players, user: entity.tank }).where(entity.key);
 		}
 
 		function input(input: ClientKeyboard) {
@@ -114,6 +132,7 @@ interface Tank {
 	position: vec2;
 	velocity: vec2;
 	name: string;
+	id: number;
 }
 
 interface StateUpdate {
