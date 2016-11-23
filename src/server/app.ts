@@ -24,10 +24,13 @@ export function init() {
 	console.log("Server is running");
 }
 
-let StateUpdateCodec = bser.gen<StateUpdate>({ user: { name: "", position: vec2.zero, velocity: vec2.zero, id: 0, angle: 0 },
-	players: [ { name: "", position: vec2.zero, velocity: vec2.zero, id: 0, angle: 0 } ], bullets: [ { id: 0, position: vec2.zero, velocity: vec2.zero }] });
+let StateUpdateCodec = bser.gen<StateUpdate>({
+	user: { name: "", position: vec2.zero, velocity: vec2.zero, id: 0, angle: 0, health: 0 },
+	players: [{ name: "", position: vec2.zero, velocity: vec2.zero, id: 0, angle: 0, health: 0 }], bullets: [{ id: 0, position: vec2.zero, velocity: vec2.zero }]
+});
+
 let ClientIdentifyCodec = bser.gen<ClientIdentify>({ name: "" });
-let ClientInputCodec = bser.gen<ClientInput>({ input: [ 0 ], angle: 0, shoot: false });
+let ClientInputCodec = bser.gen<ClientInput>({ input: [0], angle: 0, shoot: false });
 
 function main() {
 	let handler = uws(server);
@@ -39,8 +42,8 @@ function main() {
 
 	socket.on.open.do(event => {
 		tanks.push({
-			tank: { name: "Unnamed", position: vec2.zero, velocity: vec2.zero, id: event.from, angle: 0 },
-			input: { input: [ 0, 0, 0, 0], angle: 0, shoot: false },
+			tank: { name: "Unnamed", position: vec2.zero, velocity: vec2.zero, id: event.from, angle: 0, health: 1 },
+			input: { input: [0, 0, 0, 0], angle: 0, shoot: false },
 			key: event.from,
 			cooldown: 0
 		});
@@ -48,10 +51,10 @@ function main() {
 
 	socket.on.game(0x00).do(event => {
 		let bpi = event.bpi(ClientIdentifyCodec);
-	
+
 		if (!bpi.valid)
 			return;
-			
+
 		for (let tank of tanks) {
 			if (tank.key === event.from) {
 				tank.tank.name = bpi.input.name;
@@ -64,16 +67,38 @@ function main() {
 		if (!bpi.valid || bpi.input.input.length > 4 || bpi.input.input.length === 0)
 			return;
 
-		let kkk = bpi.input.input.length - 1;
-		for (let i = kkk; i < 4; ++i) {
-			bpi.input.input[i] = bpi.input.input[kkk];
-		}
-
+		let dead = false;
 		for (let tank of tanks) {
-			if (tank.key === event.from) {
-				tank.input = bpi.input;
+			if (tank.tank.id === event.from) {
+				if (tank.tank.health <= 0) {
+					dead = true;
+					break;
+				}
 			}
 		}
+
+		if (!dead) {
+			let kkk = bpi.input.input.length - 1;
+			for (let i = kkk; i < 4; ++i) {
+				bpi.input.input[i] = bpi.input.input[kkk];
+			}
+
+			for (let tank of tanks) {
+				if (tank.key === event.from) {
+					tank.input = bpi.input;
+					break;
+				}
+			}
+		} else {
+			for (let tank of tanks) {
+				if (tank.key === event.from) {
+					tank.input.input = [0, 0, 0, 0];
+					tank.input.shoot = false;
+					break;
+				}
+			}
+		}
+
 	});
 
 	socket.on.close.do(event => {
@@ -98,19 +123,47 @@ function main() {
 
 
 		for (let entity of tanks) {
+			let shot = false;
+			let knockback = vec2.polar(entity.tank.angle + Math.PI, 0.6);
 			entity.tank.angle = entity.input.angle;
-		
+
 			entity.cooldown -= deltatime / 1000;
 			if (entity.input.shoot && entity.cooldown <= 0) {
-				bullets.push({ bullet: { position: vec2.add(entity.tank.position, vec2.polar(entity.tank.angle, 0.2)), velocity: vec2.polar(entity.tank.angle, 1.9), id: uniqueBulletId++ }, time: 0 });
-				entity.cooldown = 0.25;
-			}
-			
-			for (let i = 0; i < 4; ++i) {
-				engine(entity.tank, deltatime, input(new ClientKeyboard(entity.input.input[i])));
+				bullets.push({ bullet: { position: vec2.add(entity.tank.position, vec2.polar(entity.tank.angle, 0.2)), velocity: vec2.polar(entity.tank.angle, 2.4), id: uniqueBulletId++ }, time: 0 });
+				entity.cooldown = 0.33;
+				shot = true;
 			}
 
+			for (let i = 0; i < 4; ++i) {
+				engine(entity.tank, deltatime, vec2.add(input(new ClientKeyboard(entity.input.input[i])), shot ? knockback : vec2.zero));
+			}
 		}
+
+		let hit: wsw.Client[] = [];
+		let hitBullet: { bullet: number, clientps: vec2 }[] = [];
+
+		for (let entity of tanks) {
+			for (let bullet of bullets) {
+				let diff = vec2.subtract(entity.tank.position, bullet.bullet.position);
+				if (vec2.magnitude(diff) <= 0.105) {
+					hit.push(entity.tank.id);
+					hitBullet.push({ bullet: bullet.bullet.id, clientps: entity.tank.position });
+					entity.tank.health -= 0.24;
+					entity.tank.velocity = vec2.add(entity.tank.velocity, vec2.scale(0.15, bullet.bullet.velocity));
+				}
+			}
+		}
+
+		for (let i = bullets.length - 1; i >= 0; i--) {
+			for (let j = 0; j < hitBullet.length; j++) {
+				if (bullets[i].bullet.id === hitBullet[j].bullet) {
+					bullets[i].bullet.velocity = vec2.zero;
+					bullets[i].bullet.position = hitBullet[j].clientps;
+					break;
+				}
+			}
+		}
+
 
 		let clientBullets: Bullet[] = [];
 		for (let bullet of bullets) {
@@ -118,14 +171,14 @@ function main() {
 		}
 
 		for (let tank of tanks) {
-		
-		
+
+
 			let entity = tank;
 			let players: Tank[] = [];
 			for (let element of tanks) {
 				if (element.key === entity.key)
 					continue;
-	
+
 				players.push(element.tank);
 			}
 
@@ -133,9 +186,18 @@ function main() {
 			send({ players: players, user: entity.tank, bullets: clientBullets }).where(entity.key);
 		}
 
+		for (let i = bullets.length - 1; i >= 0; i--) {
+			for (let j = 0; j < hitBullet.length; j++) {
+				if (bullets[i].bullet.id === hitBullet[j].bullet) {
+					bullets.splice(i, 1);
+					break;
+				}
+			}
+		}
+
 		function input(input: ClientKeyboard) {
 			let result = vec2.zero;
-			let force = 0.351;
+			let force = 0.233;
 
 			result.x -= input.left ? 1 : 0;
 			result.x += input.right ? 1 : 0;
@@ -144,17 +206,28 @@ function main() {
 
 			if (result.x === 0 && result.y === 0)
 				return vec2.zero;
-			
+
 			return vec2.scale(force, vec2.normalize(result));
 		}
 
 		function engine(tank: Tank, deltatime: number, acc: vec2) {
 			let dt = deltatime / 1000;
-			let momentum = 0.93;
+			let momentum = 0.97;
 
 			tank.velocity = vec2.add(tank.velocity, vec2.scale(dt, acc));
 			tank.position = vec2.add(tank.position, vec2.scale(dt, tank.velocity));
 			tank.velocity = vec2.scale(momentum, tank.velocity);
+
+			if (tank.position.x < -3 + 0.08)
+				tank.position.x = -3 + 0.08;
+			else if (tank.position.x > 3 - 0.08)
+				tank.position.x = 3 - 0.08;
+
+
+			if (tank.position.y < -3 + 0.08)
+				tank.position.y = -3 + 0.08;
+			else if (tank.position.y > 3 - 0.08)
+				tank.position.y = 3 - 0.08;
 		}
 
 		function bulletEngine(bullet: { bullet: Bullet, time: number }, deltatime: number) {
@@ -172,6 +245,7 @@ interface Tank {
 	name: string;
 	id: number;
 	angle: number;
+	health: number;
 }
 
 interface StateUpdate {
@@ -226,7 +300,7 @@ class ClientKeyboard {
 	public set right(value: boolean) {
 		this.put(1, value);
 	}
-	
+
 	public set up(value: boolean) {
 		this.put(2, value);
 	}
