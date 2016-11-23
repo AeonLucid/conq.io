@@ -24,22 +24,25 @@ export function init() {
 	console.log("Server is running");
 }
 
-let StateUpdateCodec = bser.gen<StateUpdate>({ user: { name: "", position: vec2.zero, velocity: vec2.zero, id: 0 },
-	players: [ { name: "", position: vec2.zero, velocity: vec2.zero, id: 0 } ] });
+let StateUpdateCodec = bser.gen<StateUpdate>({ user: { name: "", position: vec2.zero, velocity: vec2.zero, id: 0, angle: 0 },
+	players: [ { name: "", position: vec2.zero, velocity: vec2.zero, id: 0, angle: 0 } ], bullets: [ { id: 0, position: vec2.zero, velocity: vec2.zero }] });
 let ClientIdentifyCodec = bser.gen<ClientIdentify>({ name: "" });
-let ClientInputCodec = bser.gen<ClientInput>({ input: [ 0 ] });
+let ClientInputCodec = bser.gen<ClientInput>({ input: [ 0 ], angle: 0, shoot: false });
 
 function main() {
 	let handler = uws(server);
 	let socket = new wsw.Server(handler.handler);
-	let tanks: { tank: Tank, input: ClientInput, key: wsw.Client }[] = [];
+	let tanks: { tank: Tank, input: ClientInput, key: wsw.Client, cooldown: number }[] = [];
+	let bullets: { bullet: Bullet, time: number }[] = [];
+	let uniqueBulletId = 0;
 	const deltatime = 1000 / 20;
 
 	socket.on.open.do(event => {
 		tanks.push({
-			tank: { name: "Unnamed", position: vec2.zero, velocity: vec2.zero, id: event.from },
-			input: { input: [ 0, 0, 0, 0] },
-			key: event.from
+			tank: { name: "Unnamed", position: vec2.zero, velocity: vec2.zero, id: event.from, angle: 0 },
+			input: { input: [ 0, 0, 0, 0], angle: 0, shoot: false },
+			key: event.from,
+			cooldown: 0
 		});
 	});
 
@@ -83,23 +86,51 @@ function main() {
 	});
 
 	new util.HighResolutionTimer(deltatime, timer => {
+		for (let i = bullets.length - 1; i >= 0; i--) {
+			if (bullets[i].time > 1)
+				bullets.splice(i, 1);
+		}
+
+		for (let bullet of bullets) {
+			bulletEngine(bullet, deltatime);
+		}
+
+
+
 		for (let entity of tanks) {
+			entity.tank.angle = entity.input.angle;
+		
+			entity.cooldown -= deltatime / 1000;
+			if (entity.input.shoot && entity.cooldown <= 0) {
+				bullets.push({ bullet: { position: vec2.add(entity.tank.position, vec2.polar(entity.tank.angle, 0.2)), velocity: vec2.polar(entity.tank.angle, 1.9), id: uniqueBulletId++ }, time: 0 });
+				entity.cooldown = 0.25;
+			}
+			
 			for (let i = 0; i < 4; ++i) {
 				engine(entity.tank, deltatime, input(new ClientKeyboard(entity.input.input[i])));
 			}
+
+		}
+
+		let clientBullets: Bullet[] = [];
+		for (let bullet of bullets) {
+			clientBullets.push(bullet.bullet);
 		}
 
 		for (let tank of tanks) {
+		
+		
 			let entity = tank;
 			let players: Tank[] = [];
 			for (let element of tanks) {
 				if (element.key === entity.key)
 					continue;
+	
 				players.push(element.tank);
 			}
 
 			let send = socket.app.serialize(StateUpdateCodec, 0x01, 0x01);
-			send({ players: players, user: entity.tank }).where(entity.key);
+			send({ players: players, user: entity.tank, bullets: clientBullets }).where(entity.key);
 		}
 
 		function input(input: ClientKeyboard) {
@@ -125,6 +156,13 @@ function main() {
 			tank.position = vec2.add(tank.position, vec2.scale(dt, tank.velocity));
 			tank.velocity = vec2.scale(momentum, tank.velocity);
 		}
+
+		function bulletEngine(bullet: { bullet: Bullet, time: number }, deltatime: number) {
+			let dt = deltatime / 1000;
+
+			bullet.bullet.position = vec2.add(bullet.bullet.position, vec2.scale(dt, bullet.bullet.velocity));
+			bullet.time += dt;
+		}
 	}).run();
 }
 
@@ -133,11 +171,13 @@ interface Tank {
 	velocity: vec2;
 	name: string;
 	id: number;
+	angle: number;
 }
 
 interface StateUpdate {
 	user: Tank;
 	players: Tank[];
+	bullets: Bullet[];
 }
 
 interface ClientIdentify {
@@ -146,6 +186,14 @@ interface ClientIdentify {
 
 interface ClientInput {
 	input: number[];
+	angle: number;
+	shoot: boolean;
+}
+
+interface Bullet {
+	id: number;
+	position: vec2;
+	velocity: vec2;
 }
 
 class ClientKeyboard {

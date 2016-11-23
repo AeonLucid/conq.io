@@ -3,20 +3,26 @@
 let body: HTMLElement = document.body;
 let engine: ConcreteEngine;
 
-let vec2 = mvec.vec2;
+
 let displayname: string = "Unnamed";
+let vec2 = mvec.vec2;
 type vec2 = mvec.vec2;
+
+let mat2 = mvec.mat2;
+type mat2 = mvec.mat2;
 
 interface Tank {
 	position: vec2;
 	velocity: vec2;
 	name: string;
 	id: number;
+	angle: number;
 }
 
 interface StateUpdate {
 	user: Tank;
 	players: Tank[];
+	bullets: Bullet[];
 }
 
 interface ClientIdentify {
@@ -25,12 +31,20 @@ interface ClientIdentify {
 
 interface ClientInput {
 	input: number[];
+	angle: number;
+	shoot: boolean;
 }
 
-let StateUpdateCodec = bser.gen<StateUpdate>({ user: { name: "", position: vec2.zero, velocity: vec2.zero, id: 0 },
-	players: [ { name: "", position: vec2.zero, velocity: vec2.zero, id: 0 } ] });
+interface Bullet {
+	id: number;
+	position: vec2;
+	velocity: vec2;
+}
+
+let StateUpdateCodec = bser.gen<StateUpdate>({ user: { name: "", position: vec2.zero, velocity: vec2.zero, id: 0, angle: 0 },
+	players: [ { name: "", position: vec2.zero, velocity: vec2.zero, id: 0, angle: 0 } ], bullets: [ { id: 0, position: vec2.zero, velocity: vec2.zero }] });
 let ClientIdentifyCodec = bser.gen<ClientIdentify>({ name: "" });
-let ClientInputCodec = bser.gen<ClientInput>({ input: [ 0 ] });
+let ClientInputCodec = bser.gen<ClientInput>({ input: [ 0 ], angle: 0, shoot: false });
 
 class ClientKeyboard {
 	private m_input: number;
@@ -124,16 +138,14 @@ class PlayerOffset {
 	}
 }
 
-class Interpolate {
+class BulletInterpolate {
 	private m_beforePosition: vec2;
 	private m_afterPosition: vec2;
 	private m_id: number;
-	private m_name: string;
 
-	constructor(position: vec2, id: number, name: string) {
+	constructor(position: vec2, id: number) {
 		this.m_beforePosition = vec2.copy(position);
 		this.m_afterPosition = vec2.copy(position);
-		this.m_name = name;
 		this.m_id = id;
 	}
 
@@ -142,8 +154,46 @@ class Interpolate {
 		this.m_afterPosition = vec2.copy(position);
 	}
 
-	public current(time: number) {
+	public currentPosition(time: number) {
 		return vec2.add(vec2.scale(1 - time, this.m_beforePosition), vec2.scale(time, this.m_afterPosition));
+	}
+
+	public get id() {
+		return this.m_id;
+	}
+}
+
+class Interpolate {
+	private m_beforePosition: vec2;
+	private m_afterPosition: vec2;
+	private m_beforeAngle: number;
+	private m_afterAngle: number;
+	private m_id: number;
+	private m_name: string;
+
+	constructor(position: vec2, angle: number, id: number, name: string) {
+		this.m_beforePosition = vec2.copy(position);
+		this.m_afterPosition = vec2.copy(position);
+		this.m_beforeAngle = angle;
+		this.m_afterAngle = angle;
+		this.m_name = name;
+		this.m_id = id;
+	}
+
+	public update(position: vec2, angle: number) {
+		this.m_beforePosition = this.m_afterPosition;
+		this.m_afterPosition = vec2.copy(position);
+
+		this.m_beforeAngle = this.m_afterAngle;
+		this.m_afterAngle = angle;
+	}
+
+	public currentPosition(time: number) {
+		return vec2.add(vec2.scale(1 - time, this.m_beforePosition), vec2.scale(time, this.m_afterPosition));
+	}
+
+	public currentAngle(time: number) {
+		return (1 - time) * this.m_beforeAngle + time * this.m_afterAngle;
 	}
 
 	public get id() {
@@ -165,19 +215,27 @@ class ConcreteEngine extends render.BasicEngine {
 	private m_timeInterpolation: number;
 	private m_userInt: Interpolate;
 	private m_playersInt: Interpolate[];
+	private m_angle: number;
+	private m_shoot: boolean;
+
+	private m_bullets: Bullet[];
+	private m_bulletsInt: BulletInterpolate[];
 
 	protected init(g: render.Graphics, window: render.Window): void {
 		this.m_keys = new Set<number>();
-		this.m_user = { position: vec2.zero, velocity: vec2.zero, name: "", id: 0 };
+		this.m_user = { position: vec2.zero, velocity: vec2.zero, name: "", id: 0, angle: 0 };
 		this.m_players = [];
-		//this.m_socket = new wsw.Socket("wss://conq-io.herokuapp.com/");
-		this.m_socket = new wsw.Socket("ws://localhost:3000/");
+		this.m_socket = new wsw.Socket("wss://conq-io.herokuapp.com/");
+		//this.m_socket = new wsw.Socket("ws://localhost:3000/");
 		
+		this.m_shoot = false;
 		this.m_input = [];
 		this.m_offset = new PlayerOffset(this.m_user.position);
-		this.m_userInt = new Interpolate(vec2.zero, 0, "You");
+		this.m_userInt = new Interpolate(vec2.zero, 0, 0, "You");
 		this.m_timeInterpolation = 0;
 		this.m_playersInt = [];
+		this.m_bulletsInt = [];
+		this.m_bullets = [];
 
 		let on = this.m_socket.on;
 
@@ -187,22 +245,47 @@ class ConcreteEngine extends render.BasicEngine {
 		});
 
 		on.game(0x01).do(event => {			
+			
 			let bpio = event.bpio(StateUpdateCodec, ClientInputCodec);
 			if (!bpio.valid)
 				return;
 
-			this.m_userInt = new Interpolate(this.m_userInt.current(this.m_timeInterpolation), 0, "You");
-			this.m_userInt.update(bpio.input.user.position);
+			this.m_userInt = new Interpolate(this.m_userInt.currentPosition(this.m_timeInterpolation), 0, 0, "You");
+			this.m_userInt.update(bpio.input.user.position, 0);
 
-			let res: Interpolate[] = [];
+			let playersInt: Interpolate[] = [];
+			let bulletsInt: BulletInterpolate[] = [];
+
+
+		let resTank: Interpolate[] = [];
 			for (let player of this.m_players) {
 				let found = false;
 				for (let playerInt of this.m_playersInt) {
 					if (player.id === playerInt.id) {
-						let int = new Interpolate(playerInt.current(this.m_timeInterpolation), player.id, player.name); 
-						int.update(player.position);
+						let int = new Interpolate(playerInt.currentPosition(this.m_timeInterpolation), playerInt.currentAngle(this.m_timeInterpolation), player.id, player.name); 
+						int.update(player.position, player.angle);
+						resTank.push(int);
+						found = true;
+						break;
+					}
+				}
+				if (found)
+					continue;
+				let int = new Interpolate(player.position, player.angle, player.id, player.name); 
+				resTank.push(int);		
+		}
+
+
+
+		let resBullet: BulletInterpolate[] = [];
+			for (let bullet of this.m_bullets) {
+				let found = false;
+				for (let bulletInt of this.m_bulletsInt) {
+					if (bullet.id === bulletInt.id) {
+						let int = new BulletInterpolate(bulletInt.currentPosition(this.m_timeInterpolation), bullet.id); 
+						int.update(bullet.position);
 						
-						res.push(int);
+						resBullet.push(int);
 						found = true;
 						break;
 					}
@@ -210,16 +293,18 @@ class ConcreteEngine extends render.BasicEngine {
 
 				if (found)
 					continue;
-				let int = new Interpolate(player.position, player.id, player.name); 
-				res.push(int);				
+				let int = new BulletInterpolate(bullet.position, bullet.id); 
+				resBullet.push(int);				
 			}
 
-			this.m_playersInt = res;
+			this.m_playersInt = resTank;
+			this.m_bulletsInt = resBullet;
 			this.m_user = bpio.input.user;
 			this.m_players = bpio.input.players;
+			this.m_bullets = bpio.input.bullets;
 			this.m_timeInterpolation = 0;
 
-			bpio.send({ input: this.m_input });
+			bpio.send({ input: this.m_input, angle: this.m_angle, shoot: this.m_shoot });
 			this.m_input = [];
 		});
 
@@ -230,15 +315,27 @@ class ConcreteEngine extends render.BasicEngine {
 		body.onkeyup = event => {
 			this.m_keys.delete(event.keyCode);
 		}
+
+		body.onmousemove = event => {
+			let cursor = new vec2(this.vp.ix(event.clientX), -this.vp.iy(event.clientY));
+			this.m_angle = vec2.angle(cursor);
+		}
+
+		body.onmousedown = event => {
+			this.m_shoot = true;
+		}
+
+		body.onmouseup = event => {
+			this.m_shoot = false;
+		}
 	}
 
 	protected update(deltatime: number, window: render.Window): void {
-		this.m_offset.destination = this.m_userInt.current(this.m_timeInterpolation);
+		this.m_offset.destination = this.m_userInt.currentPosition(this.m_timeInterpolation);
 		this.m_timeInterpolation += deltatime * 15;
 		if (this.m_timeInterpolation >= 1) {
 			this.m_timeInterpolation = 1;
 		}
-		console.log(this.m_timeInterpolation);
 
 		let keys = getKeyboardInput(this.m_keys);
 		if (this.m_input.length > 3)
@@ -253,13 +350,54 @@ class ConcreteEngine extends render.BasicEngine {
 		sg.stroke(false).fill("#303030").prect(-vp.aspect, -1, 2 * vp.aspect, 2);
 
 		let transform = this.m_offset.current;
-		sg.stroke(true).stroke("#2E15A2").fill("#0E15A0").ellipse(vec2.add(vec2.subtract(this.m_userInt.current(this.m_timeInterpolation), transform), new vec2(-0.08, 0)), 0.16);
 
-		for (let player of this.m_playersInt) {		
-			sg.stroke(true).stroke("#8E15A8").fill("#AE15AA").ellipse(vec2.add(vec2.subtract(player.current(this.m_timeInterpolation), transform), new vec2(-0.08, 0)), 0.16);
+
+{
+		for (let bullet of this.m_bulletsInt) {
+				let bulletPos = vec2.subtract(bullet.currentPosition(this.m_timeInterpolation), transform);
+				sg.stroke(true).stroke("#202020").fill("#A0A0A0").ellipse(vec2.add(bulletPos, new vec2(-0.025, -0.025)), 0.05);
+			
 		}
 	}
 
+		{
+		
+			let userPos = vec2.subtract(this.m_userInt.currentPosition(this.m_timeInterpolation), transform);
+
+			// Barrel
+			let xcoord = vec2.polar(this.m_angle, 1.0);
+			let ycoord = vec2.polar(this.m_angle + Math.PI / 2, 1.0);
+
+			// Body		
+			let trans = (x: number, y: number) => {
+				return vec2.add(userPos, vec2.add(vec2.scale(x, xcoord), vec2.scale(y, ycoord)));
+			}
+
+			sg.stroke(true).stroke("#404040").fill("#808080").quad(trans(0, -0.03), trans(0.19, -0.03), trans(0.19, 0.03), trans(0, 0.03));
+			sg.stroke(true).stroke("#101010").fill("#0E15A0").ellipse(vec2.add(userPos, new vec2(-0.08, -0.08)), 0.16);
+		}
+
+{
+		for (let player of this.m_playersInt) {	
+			{
+				let userPos = vec2.subtract(player.currentPosition(this.m_timeInterpolation), transform);
+
+				// Barrel
+				let xcoord = vec2.polar(player.currentAngle(this.m_timeInterpolation), 1.0);
+				let ycoord = vec2.polar(player.currentAngle(this.m_timeInterpolation) + Math.PI / 2, 1.0);
+			
+				// Body		
+				let trans = (x: number, y: number) => {
+					return vec2.add(userPos, vec2.add(vec2.scale(x, xcoord), vec2.scale(y, ycoord)));
+				}
+					
+				sg.stroke(true).stroke("#404040").fill("#808080").quad(trans(0, -0.03), trans(0.19, -0.03), trans(0.19, 0.03), trans(0, 0.03));
+				sg.stroke(true).stroke("#101010").fill("#0E15A0").ellipse(vec2.add(userPos, new vec2(-0.08, -0.08)), 0.16);
+			}
+		}
+
+}
+}
 	protected rendertext(sg: render.SimpleGraphics, deltatime: number, window: render.Window, vp: render.Viewport): void {
 		let transform = this.m_offset.current;
 		sg.fill("#FFFFFF");
@@ -269,7 +407,7 @@ class ConcreteEngine extends render.BasicEngine {
 		sg.g.font = 'normal bold 24px monospace';
 		sg.g.lineWidth = 1;
 		for (let player of this.m_playersInt) {		
-			let ps = vec2.subtract(player.current(this.m_timeInterpolation), transform);
+			let ps = vec2.subtract(player.currentPosition(this.m_timeInterpolation), transform);
 			let offset = sg.g.measureText(player.name).width / 2;
 
 			sg.g.fillText(player.name, vp.px(ps.x), vp.py(-(ps.y + 0.22)));

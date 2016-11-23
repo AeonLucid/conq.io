@@ -7,7 +7,7 @@ namespace render {
 
 		public px(x: number): number {
 			let invAspect = this.height / this.width;
-			return (0.5 * x * invAspect + 0.5) * this.width;
+			return (x * invAspect + 1) * this.width * 0.5;
 		}
 
 		public py(y: number): number {
@@ -21,6 +21,15 @@ namespace render {
 
 		public sy(y: number): number {
 			return y * this.height * 0.5;
+		}
+
+		public ix(x: number): number {
+			let aspect = this.width / this.height;
+			return aspect * (2.0 * x / this.width - 1);
+		}
+
+		public iy(y: number): number {
+			return 2.0 * y / this.height - 1;
 		}
 
 		public get aspect(): number {
@@ -259,6 +268,10 @@ namespace render {
 		public updateViewport(): void {
 			this.m_vp.width = this.m_window.width;
 			this.m_vp.height = this.m_window.height;
+		}
+
+		public get vp() {
+			return this.m_vp;
 		}
 
 		public run(): void {
