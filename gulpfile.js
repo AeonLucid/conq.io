@@ -48,6 +48,7 @@ gulp.task("build-client", function () {
 // Compile and uglify typescript code for server
 gulp.task("build-server", function () {
     var res = gulp.src("src/server/**/*.ts")
+        .pipe(print())
         .pipe(gts(tsconfig))
         .pipe(babel(bbonfig))
         .pipe(uglify())

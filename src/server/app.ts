@@ -31,18 +31,20 @@ let StateUpdateCodec = bser.gen<StateUpdate>({
 
 let ClientIdentifyCodec = bser.gen<ClientIdentify>({ name: "" });
 let ClientInputCodec = bser.gen<ClientInput>({ input: [0], angle: 0, shoot: false });
+let KillEventCodec = bser.gen<KillEvent>({ name: "" });
+let DeadEventCodec = bser.gen<DeadEvent>({ by: "" });
 
 function main() {
 	let handler = uws(server);
 	let socket = new wsw.Server(handler.handler);
 	let tanks: { tank: Tank, input: ClientInput, key: wsw.Client, cooldown: number }[] = [];
-	let bullets: { bullet: Bullet, time: number }[] = [];
+	let bullets: { bullet: Bullet, time: number, by: wsw.Client }[] = [];
 	let uniqueBulletId = 0;
 	const deltatime = 1000 / 20;
 
 	socket.on.open.do(event => {
 		tanks.push({
-			tank: { name: "Unnamed", position: vec2.zero, velocity: vec2.zero, id: event.from, angle: 0, health: 1 },
+			tank: { name: "Unnamed", position: new vec2(Math.random() * 5 - 2.5, Math.random() * 5 - 2.5), velocity: vec2.zero, id: event.from, angle: 0, health: 1 },
 			input: { input: [0, 0, 0, 0], angle: 0, shoot: false },
 			key: event.from,
 			cooldown: 0
@@ -129,7 +131,7 @@ function main() {
 
 			entity.cooldown -= deltatime / 1000;
 			if (entity.input.shoot && entity.cooldown <= 0) {
-				bullets.push({ bullet: { position: vec2.add(entity.tank.position, vec2.polar(entity.tank.angle, 0.2)), velocity: vec2.polar(entity.tank.angle, 2.4), id: uniqueBulletId++ }, time: 0 });
+				bullets.push({ bullet: { position: vec2.add(entity.tank.position, vec2.polar(entity.tank.angle, 0.2)), velocity: vec2.polar(entity.tank.angle, 2.4), id: uniqueBulletId++ }, time: 0, by: entity.key });
 				entity.cooldown = 0.33;
 				shot = true;
 			}
@@ -148,8 +150,30 @@ function main() {
 				if (vec2.magnitude(diff) <= 0.105) {
 					hit.push(entity.tank.id);
 					hitBullet.push({ bullet: bullet.bullet.id, clientps: entity.tank.position });
+					let prevHealth = entity.tank.health;
 					entity.tank.health -= 0.24;
 					entity.tank.velocity = vec2.add(entity.tank.velocity, vec2.scale(0.15, bullet.bullet.velocity));
+					
+					
+					if (entity.tank.health <= 0) {
+						entity.tank.health = -1;
+					
+						if (prevHealth > 0) {	
+							let killerBy = "Unknown";
+							for (let killer of tanks) {
+								if (killer.key === bullet.by) {
+									killerBy = killer.tank.name;
+									
+									let send = socket.app.serialize(KillEventCodec, 0x01, 0x03);
+									send({ name: entity.tank.name }).where(bullet.by);
+								}
+							}
+
+							let send = socket.app.serialize(DeadEventCodec, 0x01, 0x02);
+							send({ by: killerBy }).where(entity.key);
+
+						}
+					}
 				}
 			}
 		}
@@ -268,6 +292,14 @@ interface Bullet {
 	id: number;
 	position: vec2;
 	velocity: vec2;
+}
+
+interface KillEvent {
+	name: string;
+}
+
+interface DeadEvent {
+	by: string;
 }
 
 class ClientKeyboard {
