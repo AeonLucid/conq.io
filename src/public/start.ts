@@ -25,6 +25,7 @@ interface Tank {
 
 interface StateUpdate {
 	user: Tank;
+	kill: number;
 	players: Tank[];
 	bullets: Bullet[];
 }
@@ -53,14 +54,26 @@ interface DeadEvent {
 	by: string;
 }
 
+interface Leaderboard {
+	name1: string;
+	name2: string;
+	name3: string;
+
+	score1: number;
+	score2: number;
+	score3: number;
+}
+
 let StateUpdateCodec = bser.gen<StateUpdate>({
 	user: { name: "", position: vec2.zero, velocity: vec2.zero, id: 0, angle: 0, health: 0 },
+	kill: 0,
 	players: [{ name: "", position: vec2.zero, velocity: vec2.zero, id: 0, angle: 0, health: 0 }], bullets: [{ id: 0, position: vec2.zero, velocity: vec2.zero }]
 });
 let ClientIdentifyCodec = bser.gen<ClientIdentify>({ name: "" });
 let ClientInputCodec = bser.gen<ClientInput>({ input: [0], angle: 0, shoot: false });
 let KillEventCodec = bser.gen<KillEvent>({ name: "" });
 let DeadEventCodec = bser.gen<DeadEvent>({ by: "" });
+let LeaderboardCodec = bser.gen<Leaderboard>({ name1: "", name2: "", name3: "", score1: 0, score2: 0, score3: 0 });
 
 class ClientKeyboard {
 	private m_input: number;
@@ -263,6 +276,8 @@ class ConcreteEngine extends render.BasicEngine {
 	private m_angle: number;
 	private m_shoot: boolean;
 	private m_cursor: vec2;
+	private m_kill: number;
+	private m_leaderboard: Leaderboard;
 
 	private m_bullets: Bullet[];
 	private m_bulletsInt: BulletInterpolate[];
@@ -271,8 +286,8 @@ class ConcreteEngine extends render.BasicEngine {
 		this.m_keys = new Set<number>();
 		this.m_user = { position: vec2.zero, velocity: vec2.zero, name: "", id: 0, angle: 0, health: 1 };
 		this.m_players = [];
-		this.m_socket = new wsw.Socket("wss://conq-io.herokuapp.com/");
-		//this.m_socket = new wsw.Socket("ws://localhost:3000/");
+		//this.m_socket = new wsw.Socket("wss://conq-io.herokuapp.com/");
+		this.m_socket = new wsw.Socket("ws://localhost:3000/");
 
 		this.m_shoot = false;
 		this.m_input = [];
@@ -283,6 +298,8 @@ class ConcreteEngine extends render.BasicEngine {
 		this.m_bulletsInt = [];
 		this.m_bullets = [];
 		this.m_cursor = vec2.zero;
+		this.m_kill = 0;
+		this.m_leaderboard = { name1: "", name2: "", name3: "", score1: -1, score2: -1, score3: -1 };
 
 		let on = this.m_socket.on;
 
@@ -307,7 +324,15 @@ class ConcreteEngine extends render.BasicEngine {
 
 			kill = bpi.input.name;
 			killTime = 3;
-		})
+		});
+
+		on.game(0x04).do(event => {
+			let bpi = event.bpi(LeaderboardCodec);
+			if (!bpi.valid)
+				return;
+
+			this.m_leaderboard = bpi.input;
+		});
 
 		on.game(0x01).do(event => {
 
@@ -321,13 +346,13 @@ class ConcreteEngine extends render.BasicEngine {
 			let playersInt: Interpolate[] = [];
 			let bulletsInt: BulletInterpolate[] = [];
 
-
 			let resTank: Interpolate[] = [];
 			for (let player of this.m_players) {
 				let found = false;
 				for (let playerInt of this.m_playersInt) {
 					if (player.id === playerInt.id) {
-						let int = new Interpolate(playerInt.currentPosition(this.m_timeInterpolation), playerInt.currentAngle(this.m_timeInterpolation), player.id, player.name, playerInt.currentHealth(this.m_timeInterpolation));
+						let int = new Interpolate(playerInt.currentPosition(this.m_timeInterpolation),
+							playerInt.currentAngle(this.m_timeInterpolation), player.id, player.name, playerInt.currentHealth(this.m_timeInterpolation));
 						int.update(player.position, player.angle, player.health);
 						resTank.push(int);
 						found = true;
@@ -339,8 +364,6 @@ class ConcreteEngine extends render.BasicEngine {
 				let int = new Interpolate(player.position, player.angle, player.id, player.name, player.health);
 				resTank.push(int);
 			}
-
-
 
 			let resBullet: BulletInterpolate[] = [];
 			for (let bullet of this.m_bullets) {
@@ -362,14 +385,13 @@ class ConcreteEngine extends render.BasicEngine {
 				resBullet.push(int);
 			}
 
-
-
 			this.m_playersInt = resTank;
 			this.m_bulletsInt = resBullet;
 			this.m_user = bpio.input.user;
 			this.m_players = bpio.input.players;
 			this.m_bullets = bpio.input.bullets;
 			this.m_timeInterpolation = 0;
+			this.m_kill = bpio.input.kill;
 
 			bpio.send({ input: this.m_input, angle: this.m_angle, shoot: this.m_shoot });
 			this.m_input = [];
@@ -402,7 +424,6 @@ class ConcreteEngine extends render.BasicEngine {
 			this.m_angle = vec2.angle(vec2.subtract(this.m_cursor, pivot));
 		}
 
-
 		this.m_offset.destination = this.m_userInt.currentPosition(this.m_timeInterpolation);
 		this.m_timeInterpolation += deltatime * 15;
 		if (this.m_timeInterpolation >= 1) {
@@ -427,18 +448,34 @@ class ConcreteEngine extends render.BasicEngine {
 
 		let transform = this.m_offset.current;
 
-		sg.stroke(4);
+		/* Grid */ {
+			sg.stroke(1);
+			sg.stroke(true).fill(false).stroke("#292929");
+
+			let dx = 0.06;
+			let dy = 0.06;
+			let ox = util.modulo(-transform.x, dx);
+			let oy = util.modulo(-transform.y, dy);
+
+			for (let x = -vp.aspect + ox; x < vp.aspect; x += dx) {
+				sg.pline(x, -1, x, 1);
+			}
+
+			for (let y = -1 + oy; y < 1; y += dy) {
+				sg.pline(-vp.aspect, y, vp.aspect, y);
+			}
+		}
+
+		sg.stroke(4).fill(true);
 
 		{
 			for (let bullet of this.m_bulletsInt) {
 				let bulletPos = vec2.subtract(bullet.currentPosition(this.m_timeInterpolation), transform);
 				sg.stroke(true).stroke("#430005").fill("#A30015").ellipse(vec2.add(bulletPos, new vec2(-0.025, -0.025)), 0.05);
-
 			}
 		}
 
 		{
-
 			let userPos = vec2.subtract(this.m_userInt.currentPosition(this.m_timeInterpolation), transform);
 
 			// Barrel
@@ -452,8 +489,9 @@ class ConcreteEngine extends render.BasicEngine {
 
 			sg.stroke(true).stroke("#202020").fill("#808080").quad(trans(0, -0.03), trans(0.19, -0.03), trans(0.19, 0.03), trans(0, 0.03));
 			sg.stroke(true).stroke("#202020").fill("#808080").quad(trans(0, -0.07), trans(0.11, -0.03), trans(0.11, 0.03), trans(0, 0.07));
-			if (this.m_user.health > 0)
-				sg.stroke(true).stroke(interpolateColor({ r: 0x43, g: 0x00, b: 0x05 }, { r: 0x00, g: 0x05, b: 0x40 }, this.m_user.health)).fill(interpolateColor({ r: 0xA3, g: 0x00, b: 0x15 }, { r: 0x0E, g: 0x15, b: 0xA0 }, this.m_user.health));
+			if (this.m_user.health > 0) {
+				sg.fill(interpolateColor({ r: 0xA3, g: 0x00, b: 0x15 }, { r: 0x0E, g: 0x35, b: 0xC0 }, this.m_user.health));
+			}
 			sg.ellipse(vec2.add(userPos, new vec2(-0.08, -0.08)), 0.16);
 		}
 
@@ -473,14 +511,12 @@ class ConcreteEngine extends render.BasicEngine {
 
 					sg.stroke(true).stroke("#202020").fill("#808080").quad(trans(0, -0.03), trans(0.19, -0.03), trans(0.19, 0.03), trans(0, 0.03));
 					sg.stroke(true).stroke("#202020").fill("#808080").quad(trans(0, -0.07), trans(0.11, -0.03), trans(0.11, 0.03), trans(0, 0.07));
-					
-					if (player.currentHealth(this.m_timeInterpolation) > 0)
-						sg.stroke(true).stroke(interpolateColor({ r: 0x43, g: 0x00, b: 0x05 }, { r: 0x00, g: 0x05, b: 0x40 }, player.currentHealth(this.m_timeInterpolation)));
-					sg.fill(interpolateColor({ r: 0xA3, g: 0x00, b: 0x15 }, { r: 0x0E, g: 0x15, b: 0xA0 }, player.currentHealth(this.m_timeInterpolation))).ellipse(vec2.add(userPos, new vec2(-0.08, -0.08)), 0.16);
-
+					if (player.currentHealth(this.m_timeInterpolation) > 0) {
+						sg.fill(interpolateColor({ r: 0xA3, g: 0x00, b: 0x15 }, { r: 0x0E, g: 0x35, b: 0xC0 }, player.currentHealth(this.m_timeInterpolation)));
+					}
+					sg.ellipse(vec2.add(userPos, new vec2(-0.08, -0.08)), 0.16);
 				}
 			}
-
 		}
 
 		{
@@ -507,9 +543,10 @@ class ConcreteEngine extends render.BasicEngine {
 			drawLine(3.02, 3.02, 3.02, -3.02);
 		}
 
-		/* HUD */{
-			sg.fill("#D0D0D0").stroke("#202020").prect(-0.6, -0.93, 1.2, 0.03);
-			sg.fill("#A01010").prect(-0.6, -0.93, (this.m_user.health > 0) ? (1.2 * this.m_user.health) : 0, 0.03);
+		/* HUD */ {
+			sg.fill("#D0D0D0").stroke("#202020").prrect(-0.6, -0.93, 1.2, 0.03, 0.13);
+			if (this.m_user.health > 0)
+				sg.fill("#C02020").prrect(-0.6, -0.93, (this.m_user.health > 0) ? (1.2 * this.m_user.health) : 0, 0.03, 0.13);
 		}
 	}
 	protected rendertext(sg: render.SimpleGraphics, deltatime: number, window: render.Window, vp: render.Viewport): void {
@@ -518,7 +555,7 @@ class ConcreteEngine extends render.BasicEngine {
 		sg.stroke("#000000");
 		sg.g.textAlign = "center";
 		sg.g.textBaseline = "middle";
-		sg.g.font = 'normal bold 24px monospace';
+		sg.g.font = 'normal bold 24px Ubuntu';
 		sg.stroke(1);
 		for (let player of this.m_playersInt) {
 			let ps = vec2.subtract(player.currentPosition(this.m_timeInterpolation), transform);
@@ -529,32 +566,71 @@ class ConcreteEngine extends render.BasicEngine {
 		}
 
 		sg.stroke(2);
-		sg.g.font = 'normal bold 48px monospace';
+		sg.g.font = 'normal bold 48px Ubuntu';
 		sg.g.fillText(displayname, vp.px(0), vp.py(0.8));
 		sg.g.strokeText(displayname, vp.px(0), vp.py(0.8));
 
 		if (killed) {
 			sg.stroke(2);
-			sg.g.font = 'normal bold 36px monospace';
+			sg.g.font = 'normal bold 48px Ubuntu';
 			sg.g.fillText("You got rekt by " + killedBy, vp.px(0), vp.py(0));
+			sg.g.strokeText("You got rekt by " + killedBy, vp.px(0), vp.py(0));
 
 			sg.stroke(1);
-			sg.g.font = 'normal bold 12px monospace';
+			sg.g.font = 'normal bold 16px Ubuntu';
 			sg.g.fillText("Please refresh the browser to start a new game", vp.px(0), vp.py(0.1));
+			sg.g.strokeText("Please refresh the browser to start a new game", vp.px(0), vp.py(0.1));
 		}
 
 		if (killTime > 0) {
+			sg.stroke(true).fill("#FFFFFF").stroke("#000000");
 			sg.stroke(1);
-			sg.g.font = 'normal bold 20px monospace';
-			sg.g.globalAlpha = (killTime >= 1) ? 1 : killTime;
+			sg.g.font = 'normal bold 20px Ubuntu';
+			sg.g.fillStyle = "rgba(255, 255, 255, " + ((killTime >= 1) ? 1 : killTime) + ")";
 			sg.g.fillText("You have killed " + kill, vp.px(0), vp.py(-0.92));
-			sg.g.globalAlpha = 1;
+			sg.g.strokeText("You have killed " + kill, vp.px(0), vp.py(-0.92));
+			sg.fill("#FFFFFF");
+			sg.stroke("#000000");
+		}
+
+		{
+			sg.g.font = 'normal bold 22px Ubuntu';
+			sg.stroke(1);
+			sg.g.fillText("Leaderboard", vp.px(vp.aspect - 0.22), vp.py(-0.94));
+			sg.g.strokeText("Leaderboard", vp.px(vp.aspect - 0.22), vp.py(-0.94));
+
+			sg.stroke(2);
+			sg.stroke("#A0A0A0");
+			sg.pline(vp.aspect - 0.4, -0.9, vp.aspect - 0.05, -0.9);
+			sg.fill("#FFFFFF");
+			sg.stroke("#000000");
+
+			sg.g.font = 'normal bold 16px Ubuntu';
+			sg.stroke(1);
+			let lb = this.m_leaderboard;
+
+			if (lb.score1 >= 0) {
+				sg.g.fillText(lb.name1 + " - " + lb.score1, vp.px(vp.aspect - 0.22), vp.py(-0.86));
+				sg.g.strokeText(lb.name1 + " - " + lb.score1, vp.px(vp.aspect - 0.22), vp.py(-0.86));
+			}
+
+			if (lb.score2 >= 0) {
+				sg.g.fillText(lb.name2 + " - " + lb.score2, vp.px(vp.aspect - 0.22), vp.py(-0.82));
+				sg.g.strokeText(lb.name2 + " - " + lb.score2, vp.px(vp.aspect - 0.22), vp.py(-0.82));
+			}
+
+			if (lb.score3 >= 0) {
+				sg.g.fillText(lb.name3 + " - " + lb.score3, vp.px(vp.aspect - 0.22), vp.py(-0.78));
+				sg.g.strokeText(lb.name3 + " - " + lb.score3, vp.px(vp.aspect - 0.22), vp.py(-0.78));
+			}
 		}
 
 		sg.stroke(1);
-		sg.g.font = 'normal bold 16px monospace';
+		sg.g.font = 'normal bold 24px Ubuntu';
 		sg.g.textAlign = "left";
 		sg.g.textBaseline = "left";
+		sg.g.fillText("Score: " + this.m_kill, vp.px(-vp.aspect + 0.04), vp.py(0.94));
+		sg.g.strokeText("Score: " + this.m_kill, vp.px(-vp.aspect + 0.04), vp.py(0.94));
 	}
 }
 
@@ -589,7 +665,6 @@ class Startup {
 				window.requestAnimationFrame(main);
 				engine.run();
 			}
-
 			main();
 		})();
 		return 0;

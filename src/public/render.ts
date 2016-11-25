@@ -7,20 +7,20 @@ namespace render {
 
 		public px(x: number): number {
 			let invAspect = this.height / this.width;
-			return (x * invAspect + 1) * this.width * 0.5;
+			return ((x * invAspect + 1) * this.width * 0.5) | 0;
 		}
 
 		public py(y: number): number {
-			return (y + 1.0) * this.height * 0.5;
+			return ((y + 1.0) * this.height * 0.5) | 0;
 		}
 
 		public sx(x: number): number {
 			let invAspect = this.height / this.width;
-			return x * this.width * invAspect * 0.5;
+			return (x * this.width * invAspect * 0.5) | 0;
 		}
 
 		public sy(y: number): number {
-			return y * this.height * 0.5;
+			return (y * this.height * 0.5) | 0;
 		}
 
 		public ix(x: number): number {
@@ -106,6 +106,18 @@ namespace render {
 			return this;
 		}
 
+		public rrect(p: mvec.vec2, s: mvec.vec2, r: number) {
+			let v = this.m_viewport;
+
+			this.impl_rrect(v.px(p.x), v.py(p.y), v.sx(s.x), v.sy(s.y), v.sy(r));
+		}
+
+		public prrect(px: number, py: number, sx: number, sy: number, r: number) {
+			let v = this.m_viewport;
+
+			this.impl_rrect(v.px(px), v.py(py), v.sx(sx), v.sy(sy), v.sy(r));
+		}
+
 		public rect(p: mvec.vec2, s: mvec.vec2) {
 			let g = this.m_graphics;
 			let v = this.m_viewport;
@@ -161,6 +173,43 @@ namespace render {
 		public pellipse(px: number, py: number, sx: number, sy: number = sx) {
 			let v = this.m_viewport;
 			this.impl_ellipse(v.px(px), v.py(py), v.sx(sx), v.sy(sy));
+		}
+
+		private impl_rrect(x: number, y: number, w: number, h: number, r: number) {
+			let g = this.m_graphics;
+
+			if (w < 2 * r)
+				r = w / 2;
+			if (h < 2 * r)
+				r = h / 2;
+
+			if (this.m_fill) {
+				g.save();
+				g.beginPath();
+
+				g.moveTo(x + r, y);
+				g.arcTo(x + w, y, x + w, y + h, r);
+				g.arcTo(x + w, y + h, x, y + h, r);
+				g.arcTo(x, y + h, x, y, r);
+				g.arcTo(x, y, x + w, y, r);
+
+				g.closePath();
+				g.restore();
+				g.fill();
+			} if (this.m_stroke) {
+				g.save();
+				g.beginPath();
+
+				g.moveTo(x + r, y);
+				g.arcTo(x + w, y, x + w, y + h, r);
+				g.arcTo(x + w, y + h, x, y + h, r);
+				g.arcTo(x, y + h, x, y, r);
+				g.arcTo(x, y, x + w, y, r);
+
+				g.closePath();
+				g.restore();
+				g.stroke();
+			}
 		}
 
 		private impl_triangle(ax: number, ay: number, bx: number, by: number, cx: number, cy: number) {
