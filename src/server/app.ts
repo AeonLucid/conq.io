@@ -153,7 +153,7 @@ function main() {
                     hit.push(entity.tank.id);
                     hitBullet.push({ bullet: bullet.bullet.id, clientps: entity.tank.position });
                     let prevHealth = entity.tank.health;
-                    entity.tank.health -= 0.24;
+                    entity.tank.health -= 0.21;
                     entity.tank.velocity = vec2.add(entity.tank.velocity, vec2.scale(0.15, bullet.bullet.velocity));
 
 
@@ -169,6 +169,10 @@ function main() {
                                     let send = socket.app.serialize(KillEventCodec, 0x01, 0x03);
                                     send({ name: entity.tank.name }).where(bullet.by);
                                     killer.kill++;
+
+                                    killer.tank.health += 0.43;
+                                    if (killer.tank.health > 1)
+                                        killer.tank.health = 1;
                                 }
                             }
 
