@@ -1,41 +1,43 @@
-type Graphics = CanvasRenderingContext2D;
+namespace util {
+    export type Graphics = CanvasRenderingContext2D;
 
-function toInt(value: number): number {
-    return value | 0;
-}
+    export function toInt(value: number): number {
+        return value | 0;
+    }
 
-function isInt(value: number): boolean {
-    return value == toInt(value);
-}
+    export function isInt(value: number): boolean {
+        return value == toInt(value);
+    }
 
-function modulo(n: number, m: number): number {
-    return ((n % m) + m) % m;
-}
+    export function modulo(n: number, m: number): number {
+        return ((n % m) + m) % m;
+    }
 
-function degrees(radians: number): number {
-    return (radians / Math.PI) * 180.0;
-}
+    export function degrees(radians: number): number {
+        return (radians / Math.PI) * 180.0;
+    }
 
-function radians(degrees: number): number {
-    return (degrees / 180.0) * Math.PI;
-}
+    export function radians(degrees: number): number {
+        return (degrees / 180.0) * Math.PI;
+    }
 
-function wrapAngle(angle: number) {
-    let pi = Math.PI;
-    let pi2 = Math.PI * 2.0;
+    export function wrapAngle(angle: number) {
+        let pi = Math.PI;
+        let pi2 = Math.PI * 2.0;
 
-    angle = angle % pi2;
-    angle = (angle + pi2) % pi2;
-    if (angle > pi)
-        angle -= pi2;
-    return angle;
-}
+        angle = angle % pi2;
+        angle = (angle + pi2) % pi2;
+        if (angle > pi)
+            angle -= pi2;
+        return angle;
+    }
 
-function wrap(value: number, min: number, max: number): number {
-    let sum = max - min;
-    value = value % sum;
-    value = (value + sum) % sum;
-    if (value > max)
-        value -= sum;
-    return value;
+    export function wrap(value: number, min: number, max: number): number {
+        let sum = max - min;
+        value = value % sum;
+        value = (value + sum) % sum;
+        if (value > max)
+            value -= sum;
+        return value;
+    }
 }
