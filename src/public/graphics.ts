@@ -17,27 +17,23 @@ namespace gin {
 
     class TransformFrame {
         public pivot: Transform;
-        public width: number;
-        public height: number;
-        public target: number;
+        public window: WindowProperty;
 
-        constructor(pivot: Transform, width: number, height: number, target: number) {
+        constructor(pivot: Transform, window: WindowProperty) {
             this.pivot = pivot;
-            this.width = width;
-            this.height = height;
-            this.target = target;
+            this.window = window;
         }
 
         private postTransform(v: vec2) {
-            let x = (v.x + 1.0) * 0.5 * this.width;
-            let y = (1.0 - (v.y + 1.0) * 0.5) * this.height;
+            let x = (v.x + 1.0) * 0.5 * this.window.width;
+            let y = (1.0 - (v.y + 1.0) * 0.5) * this.window.height;
 
             return new vec2(x | 0, y | 0);
         }
 
         private aspectTransform(v: vec2) {
-            let a = this.width / this.height;
-            let u = this.target;
+            let a = this.window.aspect;
+            let u = this.window.target;
 
             let x = v.x;
             let y = v.y;
@@ -122,6 +118,105 @@ namespace gin {
         }
     }
 
+    class WindowProperty {
+        private m_width: number;
+        private m_height: number;
+        private m_target: number;
+
+        constructor(width: number, height: number, target: number) {
+            this.m_width = width;
+            this.m_height = height;
+            this.m_target = target;
+        }
+
+        public get width() {
+            return this.m_width;
+        }
+
+        public get height() {
+            return this.m_height;
+        }
+
+        public get aspect() {
+            return this.m_width / this.m_height;
+        }
+
+        public get target() {
+            return this.m_target;
+        }
+    }
+
+    class FontProperty {
+        private m_style: string = "normal";
+        private m_variant: string = "normal";
+        private m_weight: string = "normal";
+        private m_size: number = 10;
+        private m_family: string = "sans-serif";
+        private m_g: Graphics;
+
+        constructor(g: Graphics) {
+            this.m_g = g;
+        }
+
+        public style(value: string) {
+            this.m_style = value;
+            this.update();
+            return this;
+        }
+
+        public variant(value: string) {
+            this.m_variant = value;
+            this.update();
+            return this;
+        }
+
+        public weight(value: string) {
+            this.m_weight = value;
+            this.update();
+            return this;
+        }
+
+        public size(value: number) {
+            this.m_size = value;
+            this.update();
+            return this;
+        }
+
+        public family(value: string) {
+            this.m_family = value;
+            this.update();
+            return this;
+        }
+
+        private update() {
+            this.m_g.font = this.m_style + " " + this.m_variant + " " + this.m_weight + " " + this.m_size.toString() + "px " + this.m_family;
+        }
+    }
+
+    class TextProperty {
+        private m_font: FontProperty;
+        private m_g: Graphics;
+
+        constructor(g: Graphics) {
+            this.m_g = g;
+            this.m_font = new FontProperty(g);
+        }
+
+        public get font() {
+            return this.m_font;
+        }
+
+        public align(value: string) {
+            this.m_g.textAlign = value;
+            return this;
+        }
+
+        public baseline(value: string) {
+            this.m_g.textBaseline = value;
+            return this;
+        }
+    }
+
     class DrawInterface {
         private m_g: Graphics;
         private m_transform: TransformFrame;
@@ -131,6 +226,21 @@ namespace gin {
             this.m_g = g;
             this.m_transform = transform;
             this.m_attribute = attribute;
+        }
+
+        public text(position: mvec2, text: string) {
+            if (!(this.showStroke || this.showFill))
+                return this;
+
+            let p = this.transform(position);
+            let g = this.m_g;
+
+            if (this.showFill)
+                g.fillText(text, p.x, p.y);
+            if (this.showStroke)
+                g.strokeText(text, p.x, p.y);
+
+            return this;
         }
 
         public circle(position: mvec2, radius: number) {
@@ -278,18 +388,22 @@ namespace gin {
     export class GraphicsInterface {
         private m_stroke: StrokeProperty;
         private m_fill: FillProperty;
+        private m_window: WindowProperty;
         private m_draw: DrawInterface;
         private m_transform: TransformFrame;
         private m_g: Graphics;
         private m_attribute: GraphicsAttribute;
+        private m_text: TextProperty;
 
         constructor(g: Graphics, width: number, height: number, target: number) {
             this.m_g = g;
 
             this.m_attribute = { showFill: true, showStroke: true };
-            this.m_transform = new TransformFrame(this.origin, width, height, target);
+            this.m_window = new WindowProperty(width, height, target);
+            this.m_transform = new TransformFrame(this.origin, this.m_window);
             this.m_fill = new FillProperty(g, this.m_attribute);
             this.m_stroke = new StrokeProperty(g, this.m_attribute);
+            this.m_text = new TextProperty(g);
             this.m_draw = new DrawInterface(g, this.m_transform, this.m_attribute);
             this.begin();
         }
@@ -306,8 +420,20 @@ namespace gin {
             return this.m_fill;
         }
 
+        public get text() {
+            return this.m_text;
+        }
+
         public get draw() {
             return this.m_draw;
+        }
+
+        public get window() {
+            return this.m_window;
+        }
+
+        public get raw() {
+            return this.m_g;
         }
 
         public get pivot() {
@@ -319,15 +445,16 @@ namespace gin {
         }
 
         public resize(width: number, height: number, target: number) {
-            this.m_transform.width = width;
-            this.m_transform.height = height;
-            this.m_transform.target = target;
+            this.m_window = new WindowProperty(width, height, target);
+            this.m_transform.window = this.m_window;
         }
 
         public begin() {
             this.pivot = this.origin;
             this.fill.visible(true).color(0xFF, 0xFF, 0xFF).opacity(1);
             this.stroke.visible(true).color(0xFF, 0xFF, 0xFF).opacity(1).thickness(1);
+
+            this.m_text = new TextProperty(this.m_g);
         }
     }
 
