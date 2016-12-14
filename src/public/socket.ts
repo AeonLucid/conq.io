@@ -220,19 +220,45 @@ namespace wsw {
         }
     }
 
-    class Application {
-        private m_socket: WebSocket;
+    class SystemProperty {
+        private m_connected: () => boolean;
+        private m_open: (url: string) => void;
+        private m_close: () => void;
 
-        constructor(socket: WebSocket) {
-            this.m_socket = socket;
+        constructor(connected: () => boolean, open: (url: string) => void, close: () => void) {
+            this.m_connected = connected;
+            this.m_open = open;
+            this.m_close = close;
         }
 
+        public get connected() {
+            return this.m_connected();
+        }
+
+        public open(url: string) {
+            this.m_open(url);
+        }
+
+        public close() {
+            this.m_close();
+        }
+    }
+
+    class Application {
+        public socket: WebSocket | undefined;
+
         public send(data: Binary, main: number, sub: number) {
+            if (!this.socket)
+                return;
+
             new DataView(data).setUint16(0, (main & 0x000F) << 12 | (sub & 0x0FFF)); 
-            this.m_socket.send(data);
+            this.socket.send(data);
         }
 
         public serialize<T>(codec: Serializer<T>, main: number, sub: number) {
+            if (!this.socket)
+                return;
+
             return (object: T) => {
                 this.send(codec.encode(object, padding), main, sub);
             }
@@ -242,23 +268,68 @@ namespace wsw {
     export abstract class Serializer<T> {
         public abstract encode(object: T, padding: number): ArrayBuffer;
         public abstract decode(binary: ArrayBuffer, padding: number): T | undefined;
-    }
+    }  
 
     export class Socket {
-        private m_socket: WebSocket;
+        private m_socket: WebSocket | undefined;
+        private m_app: Application;
         private m_resolverManager: ResolverManager;
-        private m_open: boolean = false;
         private m_openListener: ResolverStateWrapper;
         private m_closeListener: ResolverStateWrapper;
-        private m_app: Application;
+        private m_system: SystemProperty;
 
-        constructor(url: string) {
+        constructor() {
             this.m_resolverManager = new ResolverManager();
-            this.m_socket = new WebSocket(url);
-            this.m_socket.binaryType = "arraybuffer";
             this.m_openListener = { listener: () => { } };
             this.m_closeListener = { listener: () => { } };
-            this.m_app = new Application(this.m_socket);
+            this.m_socket = undefined;
+            this.m_app = new Application();
+            this.m_system = new SystemProperty(this.connected.bind(this), this.open.bind(this), this.close.bind(this));
+        }
+
+        public get on() {
+            return new ResolverProperty(this.m_resolverManager,
+                this.m_openListener, this.m_closeListener);
+        }
+
+        public get app() {
+            return this.m_app;
+        }
+
+        public get sys() {
+            return this.m_system;
+        }
+
+        private connected() {
+            if (!this.m_socket)
+                return false;
+            return this.m_socket.readyState === WebSocket.OPEN;
+        }
+
+        private open(url: string) {
+            if (!this.m_socket) {
+                this.setupWebSocket(url);
+                return;
+            }
+
+            if (this.m_socket.readyState === WebSocket.OPEN || this.m_socket.readyState === WebSocket.CONNECTING)
+                return;
+            this.setupWebSocket(url);
+        }
+
+        private close() {
+            if (!this.m_socket)
+                return;
+            this.m_socket.close();
+        }
+
+        private setupWebSocket(url: string) {
+            if (this.m_socket)
+                this.m_socket.close();
+
+            this.m_socket = new WebSocket(url);
+            this.m_app.socket = this.m_socket;
+            this.m_socket.binaryType = "arraybuffer";
 
             this.m_socket.onmessage = event => {
                 let data = <ArrayBuffer>event.data;
@@ -276,19 +347,12 @@ namespace wsw {
             }
 
             this.m_socket.onopen = () => {
-                this.m_open = true;
                 this.m_openListener.listener({ app: this.m_app });
             }
 
             this.m_socket.onclose = () => {
-                this.m_open = false;
                 this.m_closeListener.listener({ app: this.m_app });
             }
-        }
-
-        public get on() {
-            return new ResolverProperty(this.m_resolverManager,
-                this.m_openListener, this.m_closeListener);
         }
     }
 }

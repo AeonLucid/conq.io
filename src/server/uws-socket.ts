@@ -11,6 +11,7 @@ class Socket {
 
     constructor(server: http.Server) {
         this.m_socket = new uws.Server({ server: server });
+        this.m_socket.startAutoPing(100);
         this.m_clients = [];
 
         this.m_handler = new wsw.SocketHandler(packet => {
